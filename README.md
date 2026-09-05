@@ -109,7 +109,7 @@ out a web server and a job queue. The core CLIs still work with nothing from
 
 ## Verifying
 
-`verify.py` runs the five acceptance criteria end to end through the real CLIs
+`verify.py` runs the seven acceptance criteria end to end through the real CLIs
 and prints the result of each, checking against `fixtures/ground_truth.json`:
 
 ```sh
@@ -215,7 +215,8 @@ built anyway.
 | `report.py` | stage 7 — HTML |
 | `make_variants.py` | fixture generator + `ground_truth.json` |
 | `make_synthetic_source.py` | synthetic source video, for testing without a download |
-| `verify.py` | the five acceptance checks |
+| `verify.py` | the seven acceptance checks |
+| `run_demo.sh` | one command: fixtures -> fingerprints -> diffs -> reports -> checks |
 | `app.py` | local web UI — FastAPI routes, SSE, static serving |
 | `jobs.py` | workflow engine — job model, stages, parallel lanes, history |
 | `frontend/` | React + TypeScript UI, built with Vite |
@@ -236,11 +237,39 @@ under `.cache/`, keyed so that a changed input invalidates its entry.
 
 ## Fixtures
 
-`make_variants.py` produces `v_base` (720p reference), `v_cut` (~12 s removed
-around the 40% mark), `v_audiodub` (one window's audio replaced with a 1 kHz
-tone, picture stream-copied), `v_reorder` (two adjacent shots swapped) and
-`v_lowres` (`v_base` at 360p). Exact timecodes are printed and written to
-`ground_truth.json`.
+One command builds every variant, diffs them all against the reference, renders
+the reports and checks them against ground truth:
+
+```sh
+./run_demo.sh sintel.mp4
+./run_demo.sh sintel.mp4 --explain     # add local model descriptions
+```
+
+`make_variants.py` produces:
+
+| Variant | What changed | Expected result |
+| --- | --- | --- |
+| `v_base` | 720p reference | — |
+| `v_lowres` | `v_base` at 360p | zero regions |
+| `v_cut` | ~12 s removed around the 40% mark | one `delete` |
+| `v_audiodub` | one window's audio replaced with a 1 kHz tone, picture stream-copied | one `audio_changed`, no visual regions |
+| `v_replace` | two shots altered in place, runtime and cuts unchanged | one `replace` |
+| `v_reorder` | two adjacent shots swapped | an `insert` plus a `delete` of the same shot |
+| `v_tv` | broadcast-style delivery: scene removed **and** audio replaced **and** a scene shortened **and** downscaled to 576p | each change located independently |
+
+Exact timecodes are printed and written to `ground_truth.json`.
+
+`v_tv` is the one to demo. It is the realistic case — a supplier delivery with
+several unrelated changes at once — and it shows that a resolution change
+contributes no false regions while real edits are still found.
+
+`v_replace` uses a horizontal flip rather than a colour regrade, and that is
+worth knowing about. phash hashes a DCT of the **greyscale** image, so on a
+sample frame a 2.5× saturation boost moved the hash by 0 bits, a 40%
+brightness lift by 6, and full greyscale conversion by 0 — all inside the
+"equal" band. A flip moved it 28. **Colour and grade changes are invisible to
+this tool by design**; catching them would want a separate colour-histogram
+signal.
 
 Edits snap to detected shot boundaries. That is deliberate: a real version
 difference is a whole beat lifted out, not 12 seconds sliced from the middle of
