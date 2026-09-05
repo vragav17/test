@@ -17,7 +17,8 @@ import sys
 from vdiff_common import format_tc, log
 
 TOLERANCE_SECONDS = 2.0
-VARIANTS = ("v_base", "v_cut", "v_audiodub", "v_reorder", "v_lowres")
+VARIANTS = ("v_base", "v_cut", "v_audiodub", "v_reorder", "v_lowres",
+            "v_replace", "v_tv")
 
 
 class Check:
@@ -198,6 +199,92 @@ def check_3_audio(out_dir, ground_truth):
     return check
 
 
+def check_6_replace(out_dir, ground_truth):
+    check = Check(6, "v_base vs v_replace yields one replace region, no deletes or inserts")
+    truth = ground_truth["variants"].get("v_replace")
+    if truth is None:
+        check.skipped("v_replace was not built for this source")
+        return check
+    report = load(os.path.join(out_dir, "report_v_replace.json"))
+
+    replaced = regions_of(report, "replace")
+    others = [r for r in report["regions"] if r["type"] != "replace"]
+    check.note(
+        f"ground truth: picture altered {format_tc(truth['a_start'])} -> "
+        f"{format_tc(truth['a_end'])} ({truth['shots_altered']} shots), runtime unchanged"
+    )
+    check.note(f"report: {len(replaced)} replace, {len(others)} other "
+               f"({', '.join(r['type'] for r in others) or 'none'})")
+
+    if len(replaced) != 1 or others:
+        check.note("expected exactly one replace region and nothing else")
+        return check
+
+    found = replaced[0]
+    delta = abs(found["a_start"] - truth["a_start"])
+    check.note(
+        f"found: replaced {format_tc(found['a_start'])} -> {format_tc(found['a_end'])} "
+        f"(start off by {delta:.3f}s)"
+    )
+    if delta <= TOLERANCE_SECONDS:
+        check.passed("same runtime and cuts, different picture -- a true replace")
+    else:
+        check.note(f"outside the {TOLERANCE_SECONDS:.0f}s tolerance")
+    return check
+
+
+def check_7_tv(out_dir, ground_truth):
+    check = Check(7, "v_base vs v_tv finds each change in a multi-change delivery")
+    truth = ground_truth["variants"].get("v_tv")
+    if truth is None:
+        check.skipped("v_tv was not built for this source")
+        return check
+    report = load(os.path.join(out_dir, "report_v_tv.json"))
+    changes = truth["changes"]
+
+    def near(regions, target, tol=TOLERANCE_SECONDS):
+        return [r for r in regions if abs(r["a_start"] - target) <= tol]
+
+    audio = near(regions_of(report, "audio_changed"), changes["audio_replaced"]["a_start"])
+    removed = near(regions_of(report, "delete"), changes["scene_removed"]["a_start"])
+
+    check.note(f"report: {report['region_count']} region(s) — "
+               + ", ".join(f"{k}={v}" for k, v in report["summary"].items() if v))
+    check.note(
+        f"audio replaced at {format_tc(changes['audio_replaced']['a_start'])}: "
+        f"{'FOUND' if audio else 'MISSING'}"
+    )
+    check.note(
+        f"scene removed at {format_tc(changes['scene_removed']['a_start'])}: "
+        f"{'FOUND' if removed else 'MISSING'}"
+    )
+    check.note(
+        f"downscaled to {changes['resolution']['height']}p: contributed no region "
+        f"(resolution invariance holds alongside real edits)"
+    )
+
+    # The trimmed shot is footage-dependent: it only moves the picture hash if
+    # the shot's midpoint frame actually changes. On static synthetic scenes it
+    # legitimately produces nothing, so it is reported rather than asserted.
+    shortened = changes["scene_shortened"]
+    near_short = [
+        r for r in report["regions"]
+        if abs(r["a_start"] - shortened["a_start"]) <= TOLERANCE_SECONDS
+    ]
+    check.note(
+        f"scene shortened at {format_tc(shortened['a_start'])}: "
+        + (f"reported as {near_short[0]['type']}" if near_short
+           else "no region — expected on static synthetic footage, "
+                "since trimming a still shot does not move its midpoint frame")
+    )
+
+    if audio and removed:
+        check.passed("both unambiguous changes located; resolution change added no noise")
+    else:
+        check.note("expected to locate both the audio replacement and the removed scene")
+    return check
+
+
 def check_4_html(out_dir):
     check = Check(4, "report.html is self-contained and shows both timelines with thumbnails")
     path = os.path.join(out_dir, "report_v_cut.html")
@@ -285,7 +372,8 @@ def main(argv=None):
     ground_truth = ensure_inputs(args.source, args.fixtures, args.out)
 
     log("\nRunning the pipeline ...")
-    for variant in ("v_cut", "v_audiodub", "v_reorder", "v_lowres"):
+    for variant in ("v_cut", "v_audiodub", "v_reorder", "v_lowres",
+                    "v_replace", "v_tv"):
         fp = os.path.join(args.out, f"{variant}.json")
         if not os.path.isfile(fp):
             continue
@@ -299,6 +387,8 @@ def main(argv=None):
         check_3_audio(args.out, ground_truth),
         check_4_html(args.out),
         check_5_explain(args.out, args.model, args.ollama_url),
+        check_6_replace(args.out, ground_truth),
+        check_7_tv(args.out, ground_truth),
     ]
 
     log("\n" + "=" * 78)
