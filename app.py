@@ -21,7 +21,20 @@ from pydantic import BaseModel
 from jobs import STAGE_DEFS, JobStore, browse
 from vdiff_common import ToolError, check_tools
 
-STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FRONTEND_DIST = os.path.join(BASE_DIR, "frontend", "dist")
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+
+
+def ui_root():
+    """Which UI to serve: the built React app, or the no-build fallback.
+
+    Keeping the plain HTML/JS version means `python app.py` works before anyone
+    has run `npm install`, which matters on a machine without node.
+    """
+    if os.path.isfile(os.path.join(FRONTEND_DIST, "index.html")):
+        return FRONTEND_DIST, "react"
+    return STATIC_DIR, "fallback"
 
 app = FastAPI(title="Version Diff")
 store = JobStore()
@@ -220,8 +233,17 @@ def download_html(job_id: str):
 
 @app.get("/")
 def index():
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+    """Serve the built React app; fall back to the no-build UI if it isn't built."""
+    root, _ = ui_root()
+    return FileResponse(os.path.join(root, "index.html"))
 
+
+if os.path.isdir(os.path.join(FRONTEND_DIST, "assets")):
+    app.mount(
+        "/assets",
+        StaticFiles(directory=os.path.join(FRONTEND_DIST, "assets")),
+        name="assets",
+    )
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -234,7 +256,13 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     import uvicorn
-    print(f"\n  Version Diff UI  ->  http://{args.host}:{args.port}\n", flush=True)
+    _, which = ui_root()
+    print(f"\n  Version Diff UI  ->  http://{args.host}:{args.port}", flush=True)
+    if which == "react":
+        print("  serving the built React app (frontend/dist)\n", flush=True)
+    else:
+        print("  serving the no-build fallback UI; run `npm --prefix frontend "
+              "install && npm --prefix frontend run build` for the React app\n", flush=True)
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     return 0
 

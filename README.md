@@ -53,12 +53,27 @@ download.
 ## UI
 
 There is also a local web app over the same pipeline, if you would rather not
-drive four CLIs by hand:
+drive four CLIs by hand. The frontend is **React + TypeScript, built with
+Vite**; the backend is FastAPI.
 
 ```sh
-uv pip install -r requirements-ui.txt
-python app.py            # then open http://127.0.0.1:8765
+uv pip install -r requirements-ui.txt     # FastAPI + uvicorn
+npm --prefix frontend install
+npm --prefix frontend run build           # emits frontend/dist
+python app.py                             # http://127.0.0.1:8765
 ```
+
+For frontend work, run the two servers side by side — Vite proxies `/api` to
+FastAPI, so hot reload works against the real pipeline:
+
+```sh
+python app.py                             # terminal 1, port 8765
+npm --prefix frontend run dev             # terminal 2, port 5173
+```
+
+`app.py` serves `frontend/dist` when it exists and falls back to the
+dependency-free UI in `static/` when it does not, so the app still runs on a
+machine with no node installed. `dist/` is not committed.
 
 Pick two files, watch the workflow run, read the result. A comparison is a
 **job** made of named stages in two parallel lanes — one per video — that
@@ -203,7 +218,13 @@ built anyway.
 | `verify.py` | the five acceptance checks |
 | `app.py` | local web UI — FastAPI routes, SSE, static serving |
 | `jobs.py` | workflow engine — job model, stages, parallel lanes, history |
-| `static/` | the UI itself (plain HTML/CSS/JS, no framework, no build step) |
+| `frontend/` | React + TypeScript UI, built with Vite |
+| `static/` | no-build fallback UI, served when `frontend/dist` is absent |
+
+Inside `frontend/src`: `types.ts` mirrors the FastAPI surface, `api.ts` is the
+typed client, `hooks/useJob.ts` owns the SSE subscription and job state, and
+`components/` holds the views. Routing is a 20-line hash hook rather than a
+router dependency — there are two views, and a job's URL is `#job/<id>`.
 
 `report.json` carries the regions with thumbnails omitted, so it stays readable
 and diffable; the JPEGs go in a `report.thumbs.json` sidecar that `report.py`
