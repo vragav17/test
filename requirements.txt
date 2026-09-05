@@ -1,0 +1,10 @@
+# Video version diff POC — pinned to what the POC actually imports.
+# Python 3.11 specifically: librosa pulls numba, whose support for newer
+# CPython releases lags behind.
+numpy>=1.24,<2.1
+opencv-python>=4.9
+imagehash>=4.3
+Pillow>=10.0
+scenedetect>=0.6.4
+librosa>=0.10.1
+requests>=2.31
