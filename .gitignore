@@ -1,0 +1,16 @@
+# Working cache: proxies, extracted frames, decoded audio, model responses.
+.cache/
+
+# Generated inputs and outputs.
+fixtures/
+out/
+sample_source.mp4
+*.mp4
+report.json
+report.thumbs.json
+report.html
+
+# Environment
+.venv/
+__pycache__/
+*.pyc
