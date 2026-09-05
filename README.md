@@ -50,6 +50,48 @@ No video to hand? `python make_synthetic_source.py -o sample_source.mp4`
 builds one, so the whole pipeline and every acceptance check can run with no
 download.
 
+## UI
+
+There is also a local web app over the same pipeline, if you would rather not
+drive four CLIs by hand:
+
+```sh
+uv pip install -r requirements-ui.txt
+python app.py            # then open http://127.0.0.1:8765
+```
+
+Pick two files, watch the workflow run, read the result. A comparison is a
+**job** made of named stages in two parallel lanes — one per video — that
+converge at alignment:
+
+```
+  A:  probe -> proxy -> shots -> fingerprint --.
+                                                >-- align -> thumbnails -> [describe] -> report
+  B:  probe -> proxy -> shots -> fingerprint --'
+```
+
+The two lanes genuinely run at the same time, so the diagram is not decoration.
+Each stage shows its own status and elapsed time, the pipeline's output streams
+into the page over SSE as it runs, and finished jobs keep their history so you
+can reopen any of them later. Each job has its own URL (`#job/<id>`).
+
+Fingerprints are cached by (file signature, cut threshold), so comparing a
+third version against one you have already fingerprinted skips that lane
+entirely — it shows as `reused`. That makes the three-cut case (theatrical vs
+special vs extended) three cheap pairwise jobs rather than six full runs.
+
+Descriptions are best-effort in the UI: if Ollama is unreachable the `describe`
+stage is marked failed with the reason and the job still finishes with a full
+report. The CLI keeps the stricter behaviour the spec asked for, and exits.
+
+**This is a single-user local tool.** It binds to `127.0.0.1`, has no
+authentication, and its file browser can read anything the running user can.
+Do not expose it on a network interface.
+
+Note that this UI is deliberately outside the original POC scope, which ruled
+out a web server and a job queue. The core CLIs still work with nothing from
+`requirements-ui.txt` installed.
+
 ## Verifying
 
 `verify.py` runs the five acceptance criteria end to end through the real CLIs
@@ -159,6 +201,9 @@ built anyway.
 | `make_variants.py` | fixture generator + `ground_truth.json` |
 | `make_synthetic_source.py` | synthetic source video, for testing without a download |
 | `verify.py` | the five acceptance checks |
+| `app.py` | local web UI — FastAPI routes, SSE, static serving |
+| `jobs.py` | workflow engine — job model, stages, parallel lanes, history |
+| `static/` | the UI itself (plain HTML/CSS/JS, no framework, no build step) |
 
 `report.json` carries the regions with thumbnails omitted, so it stays readable
 and diffable; the JPEGs go in a `report.thumbs.json` sidecar that `report.py`

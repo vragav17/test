@@ -14,3 +14,5 @@ report.html
 .venv/
 __pycache__/
 *.pyc
+
+# UI job history and artifacts live under .cache/jobs/ (already ignored above).
