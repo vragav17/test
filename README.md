@@ -217,6 +217,7 @@ built anyway.
 | `make_synthetic_source.py` | synthetic source video, for testing without a download |
 | `verify.py` | the seven acceptance checks |
 | `run_demo.sh` | one command: fixtures -> fingerprints -> diffs -> reports -> checks |
+| `make_replace.py` | build a `replace` variant from any single video, standalone |
 | `app.py` | local web UI — FastAPI routes, SSE, static serving |
 | `jobs.py` | workflow engine — job model, stages, parallel lanes, history |
 | `frontend/` | React + TypeScript UI, built with Vite |
@@ -280,6 +281,62 @@ what was actually done.
 Use a 10–15 minute short rather than a feature. Fingerprinting iterates in a
 minute or two rather than fifteen, and short runtimes render far better on the
 two-timeline report — on a two-hour bar the diff regions are hairlines.
+
+## Building a `replace` variant from one video
+
+`make_variants.py` builds a whole fixture set. To alter one range of a single
+video instead — same runtime, same cuts, different picture:
+
+```sh
+python make_replace.py sintel.mp4 -o sintel_replaced.mp4 \
+    --start 00:04:10 --end 00:04:35 --mode flip
+```
+
+| Mode | What it does | Measured distance | Shot count |
+| --- | --- | --- | --- |
+| `flip` | mirrors the picture | ~28-34 | unchanged — one clean `replace` |
+| `reframe` | punches in 30% and rescales | ~24 | unchanged — one clean `replace` |
+| `substitute` | takes footage from elsewhere in the file | ~32 | **changes**, see below |
+
+The range is snapped to detected shot boundaries by default (`--no-snap` to
+disable). Altering a range that starts mid-shot introduces a *new* cut there,
+which the segmenter reports as an extra shot — so the diff shows a spurious
+insert next to the replace.
+
+`substitute` is the most realistic edit but shifts the shot count unless the
+replacement footage is a single continuous shot of the same length, because it
+brings its own cuts with it. Measured: `flip` and `reframe` both produced
+exactly one `replace` region over 16 shots; `substitute` produced 17 shots plus
+an `insert`. The tool prints this warning when you use it.
+
+After building, `make_replace.py` verifies its own output by comparing the
+midpoint frame of the altered range in both files, and tells you whether the
+result will actually register:
+
+```
+  phash distance over the altered range: 34/64
+  OK -- above 20, so this will be reported as `replace`.
+```
+
+That check matters because most plausible-looking edits are invisible here.
+Measured on a sample frame, against a `replace` threshold of 20:
+
+| Transform | Distance | Registers? |
+| --- | --- | --- |
+| `negate` | 62 | yes |
+| `hflip` | 28 | yes |
+| punch-in 30% | 28 | yes |
+| different footage entirely | 28 | yes |
+| punch-in 15% | 14 | weak band only |
+| burned-in lower third | 14 | weak band only |
+| `gblur=sigma=12` | **0** | no |
+| hue rotate / saturation ×2.5 | **0** | no |
+| greyscale conversion | **0** | no |
+
+Blur is invisible because it preserves the low frequencies the DCT keeps.
+Colour is invisible because the image is greyscaled before hashing. A regrade,
+a colourisation or a soft-focus pass produces a file this tool correctly calls
+identical — a real property of the system, not a bug.
 
 ## Out of scope
 
