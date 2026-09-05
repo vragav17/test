@@ -14,3 +14,10 @@ report.html
 .venv/
 __pycache__/
 *.pyc
+
+# UI job history and artifacts live under .cache/jobs/ (already ignored above).
+
+# Frontend build artifacts. dist/ is not committed: app.py falls back to the
+# no-build UI in static/ until `npm run build` has been run.
+frontend/node_modules/
+frontend/dist/

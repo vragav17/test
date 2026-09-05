@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -35,8 +36,28 @@ class ToolError(RuntimeError):
 # --------------------------------------------------------------------------
 
 
+# Per-thread log redirection. The CLIs print to stdout as always; the UI
+# installs a sink so each job's progress reaches its own event stream instead.
+# Keyed by thread so two videos can be processed concurrently without their
+# output interleaving.
+_LOG_SINKS = {}
+
+
+def set_log_sink(fn):
+    """Route log() on this thread to `fn` instead of stdout."""
+    _LOG_SINKS[threading.get_ident()] = fn
+
+
+def clear_log_sink():
+    _LOG_SINKS.pop(threading.get_ident(), None)
+
+
 def log(msg):
-    print(msg, flush=True)
+    sink = _LOG_SINKS.get(threading.get_ident())
+    if sink is not None:
+        sink(msg)
+    else:
+        print(msg, flush=True)
 
 
 class Stage:

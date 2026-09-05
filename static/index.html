@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Version Diff</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark"></span>
+    <div>
+      <div class="brand-name">Version Diff</div>
+      <div class="brand-sub">Local shot-level comparison of two cuts</div>
+    </div>
+  </div>
+  <div class="env" id="env"></div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <button class="btn primary block" id="new-job-btn">New comparison</button>
+    <div class="sidebar-title">History</div>
+    <div id="job-list" class="job-list"></div>
+  </aside>
+
+  <main class="main" id="main"></main>
+</div>
+
+<!-- New comparison form -->
+<template id="tpl-new">
+  <div class="panel">
+    <h2>New comparison</h2>
+    <p class="muted">Pick two versions of the same title. Everything runs on this
+       machine; nothing is uploaded anywhere.</p>
+
+    <div class="pair">
+      <div class="pick" data-side="a">
+        <div class="pick-tag">A</div>
+        <label>Version A <span class="muted">(the reference)</span></label>
+        <div class="row">
+          <input type="text" class="input path" id="video_a" placeholder="/path/to/version_a.mkv">
+          <button class="btn browse" data-target="video_a">Browse</button>
+        </div>
+      </div>
+      <div class="pick" data-side="b">
+        <div class="pick-tag">B</div>
+        <label>Version B <span class="muted">(compared against A)</span></label>
+        <div class="row">
+          <input type="text" class="input path" id="video_b" placeholder="/path/to/version_b.mkv">
+          <button class="btn browse" data-target="video_b">Browse</button>
+        </div>
+      </div>
+    </div>
+
+    <details class="options">
+      <summary>Options</summary>
+      <div class="opt-grid">
+        <label>Cut threshold
+          <input type="number" class="input" id="threshold" value="27" step="0.5" min="1">
+          <span class="hint">Lower finds more shots. Raise it for grainy film.</span>
+        </label>
+        <label>Audio change distance
+          <input type="number" class="input" id="audio_threshold" value="16" min="1" max="64">
+          <span class="hint">Hamming distance above which matched shots count as audio-changed.</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="explain">
+          Describe changes with a local model
+          <span class="hint">Needs Ollama running. Off by default — the report works without it.</span>
+        </label>
+        <label>Model
+          <input type="text" class="input" id="model" value="qwen3-vl:8b">
+          <span class="hint" id="model-hint"></span>
+        </label>
+      </div>
+    </details>
+
+    <div class="actions">
+      <button class="btn primary" id="run-btn">Run comparison</button>
+      <span class="muted" id="run-error"></span>
+    </div>
+  </div>
+</template>
+
+<!-- File picker -->
+<div class="modal-backdrop" id="picker" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title">Choose a video</div>
+        <div class="modal-path" id="picker-path"></div>
+      </div>
+      <button class="btn ghost" id="picker-close">Close</button>
+    </div>
+    <div class="modal-body" id="picker-body"></div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
