@@ -663,4 +663,7 @@ window.addEventListener('hashchange', route);
   if (/^#job\//.test(location.hash)) route(); else showNew();
   await loadJobs();
   setInterval(loadJobs, 3000);
+  // Ollama is often started after this page is open; re-check rather than
+  // leaving a stale "offline" badge until the next reload.
+  setInterval(loadHealth, 10000);
 })();
