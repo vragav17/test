@@ -114,7 +114,7 @@ export interface Report {
 export interface RegionThumbs {
   thumbnails_a: string[];
   thumbnails_b: string[];
-  /** Base64 AAC, inlined for audio_changed regions only. */
+  /** Base64 MP3, inlined for audio_changed regions only. */
   audio_a?: string | null;
   audio_b?: string | null;
 }
