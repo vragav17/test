@@ -198,6 +198,156 @@ def ffprobe_duration(path):
         raise ToolError(f"Could not read duration from {path!r} (ffprobe said {text!r})")
 
 
+# --------------------------------------------------------------------------
+# technical properties (HDR/SDR, colour, codecs)
+# --------------------------------------------------------------------------
+
+# Transfer characteristics that mean high dynamic range.
+HDR_TRANSFERS = {
+    "smpte2084": "HDR10 (PQ)",
+    "arib-std-b67": "HLG",
+}
+
+# Field order for reporting; the first entries are what a QC operator looks at.
+TECHNICAL_FIELDS = [
+    ("dynamic_range", "Dynamic range"),
+    ("resolution", "Resolution"),
+    ("frame_rate", "Frame rate"),
+    ("bit_depth", "Bit depth"),
+    ("color_transfer", "Transfer (TRC)"),
+    ("color_primaries", "Colour primaries"),
+    ("color_space", "Matrix"),
+    ("color_range", "Range"),
+    ("pix_fmt", "Pixel format"),
+    ("video_codec", "Video codec"),
+    ("audio_codec", "Audio codec"),
+    ("audio_channels", "Audio channels"),
+    ("audio_sample_rate", "Audio sample rate"),
+]
+
+# A difference in any of these changes what the file *is*, not merely how it
+# was encoded, so the report calls them out separately.
+MATERIAL_FIELDS = {
+    "dynamic_range", "resolution", "frame_rate", "bit_depth",
+    "color_transfer", "color_primaries", "audio_channels",
+}
+
+
+def _bit_depth(video):
+    raw = video.get("bits_per_raw_sample")
+    if raw and str(raw).isdigit():
+        return int(raw)
+    # Fall back to the pixel format, which encodes depth in its name.
+    pix = video.get("pix_fmt") or ""
+    for depth in ("12", "10", "9"):
+        if depth in pix:
+            return int(depth)
+    return 8 if pix else None
+
+
+def _frame_rate(video):
+    text = video.get("r_frame_rate") or ""
+    if "/" in text:
+        num, den = text.split("/", 1)
+        try:
+            if float(den):
+                return round(float(num) / float(den), 3)
+        except ValueError:
+            return None
+    return None
+
+
+def classify_dynamic_range(transfer, primaries, bit_depth):
+    """Name the dynamic range from the colour tagging.
+
+    Deliberately reports "untagged" rather than guessing SDR: an untagged file
+    is a real QC finding, and silently calling it SDR would hide it.
+    """
+    if transfer in HDR_TRANSFERS:
+        return HDR_TRANSFERS[transfer]
+    if not transfer or transfer == "unknown":
+        if primaries == "bt2020" or (bit_depth or 0) >= 10:
+            return "untagged (wide gamut or 10-bit)"
+        return "untagged"
+    if primaries == "bt2020":
+        return "SDR (BT.2020 primaries)"
+    return "SDR (BT.709)"
+
+
+def probe_technical(path):
+    """Colour, codec and container properties of a video.
+
+    Always probe the ORIGINAL file, never the 480p proxy: the proxy is
+    transcoded to 8-bit BT.709, so every HDR property would read as SDR.
+    """
+    out = run(
+        ["ffprobe", "-v", "error", "-print_format", "json",
+         "-show_streams", "-show_format", path],
+        capture_stdout=True,
+    )
+    try:
+        data = json.loads(out)
+    except ValueError as exc:
+        raise ToolError(f"Could not parse ffprobe output for {path!r}: {exc}") from exc
+
+    streams = data.get("streams", [])
+    video = next((s for s in streams if s.get("codec_type") == "video"), {})
+    audio = next((s for s in streams if s.get("codec_type") == "audio"), {})
+
+    def tag(value):
+        return None if value in (None, "", "unknown") else value
+
+    transfer = tag(video.get("color_transfer"))
+    primaries = tag(video.get("color_primaries"))
+    depth = _bit_depth(video)
+
+    width, height = video.get("width"), video.get("height")
+    props = {
+        "dynamic_range": classify_dynamic_range(transfer, primaries, depth),
+        "resolution": f"{width}x{height}" if width and height else None,
+        "frame_rate": _frame_rate(video),
+        "bit_depth": depth,
+        "color_transfer": transfer,
+        "color_primaries": primaries,
+        "color_space": tag(video.get("color_space")),
+        "color_range": tag(video.get("color_range")),
+        "pix_fmt": tag(video.get("pix_fmt")),
+        "video_codec": tag(video.get("codec_name")),
+        "audio_codec": tag(audio.get("codec_name")),
+        "audio_channels": audio.get("channels"),
+        "audio_sample_rate": (int(audio["sample_rate"])
+                              if str(audio.get("sample_rate", "")).isdigit() else None),
+    }
+
+    # Mastering-display and content-light metadata, when the container carries it.
+    for side in video.get("side_data_list") or []:
+        kind = side.get("side_data_type", "")
+        if "Mastering display" in kind:
+            props["mastering_display"] = True
+        elif "Content light level" in kind:
+            props["max_cll"] = side.get("max_content")
+            props["max_fall"] = side.get("max_average")
+    return props
+
+
+def compare_technical(a, b):
+    """Field-by-field differences between two technical property sets."""
+    if not a or not b:
+        return []
+    diffs = []
+    for key, label in TECHNICAL_FIELDS:
+        left, right = a.get(key), b.get(key)
+        if left != right:
+            diffs.append({
+                "field": key,
+                "label": label,
+                "a": left,
+                "b": right,
+                "material": key in MATERIAL_FIELDS,
+            })
+    return diffs
+
+
 def has_audio_stream(path):
     out = run(
         [
@@ -351,6 +501,60 @@ def extract_frames(proxy, times, duration=None, workers=None):
 # --------------------------------------------------------------------------
 # thumbnails
 # --------------------------------------------------------------------------
+
+
+def extract_audio_clip(proxy, start, end, bitrate="96k", max_seconds=30.0):
+    """Cut [start, end) of the proxy's audio to a small MP3 clip; return its path.
+
+    An `audio_changed` region shows the *same* picture on both sides -- the
+    thumbnails are identical by definition. Hearing the two clips is the only
+    way for a person to confirm the finding, so the report offers them.
+
+    MP3 rather than AAC deliberately. AAC is the better codec, but it is
+    patent-encumbered and open-source Chromium builds ship without it -- an
+    <audio> element fed AAC there fails with DEMUXER_ERROR_NO_SUPPORTED_STREAMS
+    (measured). MP3 plays in every browser, which matters because the
+    standalone report is meant to be emailable to someone whose browser we do
+    not control.
+
+    Returns None when the file has no audio, rather than raising: a missing
+    clip should degrade the player, not fail the report.
+    """
+    duration = min(max(end - start, 0.0), max_seconds)
+    if duration <= 0.05:
+        return None
+    if not has_audio_stream(proxy):
+        return None
+
+    sig = file_signature(proxy)
+    folder = ensure_cache("clips", sig)
+    path = os.path.join(
+        folder, f"{int(start * 1000):09d}_{int(duration * 1000):09d}.mp3"
+    )
+    if os.path.isfile(path) and os.path.getsize(path) > 0:
+        return path
+
+    tmp = path + f".{os.getpid()}.partial.mp3"
+    try:
+        run([
+            "ffmpeg", "-nostdin", "-v", "error", "-y",
+            "-ss", f"{start:.3f}", "-t", f"{duration:.3f}", "-i", proxy,
+            "-vn", "-c:a", "libmp3lame", "-b:a", bitrate, tmp,
+        ])
+    except ToolError as exc:
+        log(f"    WARNING: could not cut audio at {start:.2f}s: {exc}")
+        return None
+    os.replace(tmp, path)
+    return path
+
+
+def audio_clip_b64(proxy, start, end, **kwargs):
+    """The same clip, base64-encoded for inlining into a standalone report."""
+    path = extract_audio_clip(proxy, start, end, **kwargs)
+    if not path:
+        return None
+    with open(path, "rb") as fh:
+        return base64.b64encode(fh.read()).decode("ascii")
 
 
 def png_to_jpeg_b64(png_bytes, max_width=320, quality=70):

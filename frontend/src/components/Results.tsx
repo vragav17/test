@@ -2,7 +2,8 @@ import { useState } from 'react';
 
 import { REGION_TYPES, TYPE_COLOR, TYPE_LABEL, fmtTc, shortTc } from '../format';
 import type { Region, RegionThumbs, RegionType, Report, VersionInfo } from '../types';
-import { RegionCard } from './RegionCard';
+import { ChangeGroup } from './ChangeGroup';
+import { TechnicalDiffs } from './TechnicalDiffs';
 
 function Track({
   tag, info, regions, side, maxDuration, onPick,
@@ -61,7 +62,11 @@ function Track({
   );
 }
 
-export function Results({ report, thumbs }: { report: Report; thumbs: RegionThumbs[] | null }) {
+export function Results({ report, thumbs, jobId }: {
+  report: Report;
+  thumbs: RegionThumbs[] | null;
+  jobId?: string;
+}) {
   const [filters, setFilters] = useState<Set<RegionType>>(new Set());
   const [flash, setFlash] = useState<{ index: number; key: number } | null>(null);
 
@@ -88,8 +93,26 @@ export function Results({ report, thumbs }: { report: Report; thumbs: RegionThum
     });
   };
 
+  // A sentence before the numbers: what a person would say out loud.
+  const verdict = (() => {
+    if (!regions.length) {
+      return report.technical_differences?.length
+        ? 'Same edit, different delivery.'
+        : 'These two versions are the same.';
+    }
+    const parts = present.map(
+      (k) => `${report.summary[k]} ${TYPE_LABEL[k].toLowerCase()}`,
+    );
+    const runtime = Math.abs(delta) >= 0.05
+      ? `, and B is ${Math.abs(delta).toFixed(1)}s ${delta > 0 ? 'longer' : 'shorter'}`
+      : '';
+    return `${parts.join(', ')}${runtime}.`;
+  })();
+
   return (
     <>
+      <div className="verdict">{verdict}</div>
+
       <div className="stats">
         <div className="stat">
           <div className="n">{report.region_count}</div>
@@ -109,6 +132,12 @@ export function Results({ report, thumbs }: { report: Report; thumbs: RegionThum
           <div className="k">runtime difference</div>
         </div>
       </div>
+
+      <TechnicalDiffs
+        differences={report.technical_differences ?? []}
+        a={report.version_a}
+        b={report.version_b}
+      />
 
       <div className="panel">
         <h3>Timelines (shared scale)</h3>
@@ -136,8 +165,10 @@ export function Results({ report, thumbs }: { report: Report; thumbs: RegionThum
 
       {regions.length === 0 ? (
         <div className="banner ok">
-          No differences found. The two versions align shot for shot, with matching picture and
-          audio throughout.
+          No edit differences. The two versions align shot for shot, with matching picture
+          and audio throughout.
+          {(report.technical_differences?.length ?? 0) > 0
+            && ' Their delivery properties differ, though — see above.'}
         </div>
       ) : (
         <>
@@ -153,22 +184,24 @@ export function Results({ report, thumbs }: { report: Report; thumbs: RegionThum
                 >
                   <i className="swatch" style={{ background: TYPE_COLOR[kind], marginRight: 7 }} />
                   <span>{TYPE_LABEL[kind]}</span>
+                  <span className="chip-count">{report.summary[kind]}</span>
                 </div>
               ))}
             </div>
           )}
-          {regions.map((region, i) =>
-            filters.size && !filters.has(region.type) ? null : (
-              <RegionCard
-                key={i}
-                index={i}
-                region={region}
-                thumbs={thumbs?.[i]}
-                flashed={flash?.index === i}
-                flashKey={flash?.key ?? 0}
+          {present
+            .filter((kind) => filters.size === 0 || filters.has(kind))
+            .map((kind) => (
+              <ChangeGroup
+                key={kind}
+                kind={kind}
+                jobId={jobId}
+                flash={flash}
+                items={regions
+                  .map((region, index) => ({ region, index, thumbs: thumbs?.[index] }))
+                  .filter((item) => item.region.type === kind)}
               />
-            ),
-          )}
+            ))}
         </>
       )}
     </>

@@ -139,7 +139,41 @@ h1 { font-size: 22px; margin: 0 0 4px; font-weight: 600; letter-spacing: -0.01em
 .empty { text-align: center; padding: 40px 20px; }
 .empty .big { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
 .empty .small { color: var(--muted); }
+.tech-headline {
+  font-size: 15px; font-weight: 600; margin: 0 0 14px; color: var(--text);
+}
+.tech-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.tech-table th {
+  text-align: left; color: var(--muted); font-weight: 550; font-size: 11.5px;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 0 14px 7px 0; border-bottom: 1px solid var(--line);
+}
+.tech-table td {
+  padding: 7px 14px 7px 0; border-bottom: 1px solid #232833;
+  font-variant-numeric: tabular-nums;
+}
+.tech-table tr.material td { color: var(--text); font-weight: 550; }
+.tech-table tr:not(.material) td { color: var(--muted); }
+.material-dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: #f5a524; margin-right: 8px; vertical-align: middle;
+}
+.tech-note { color: var(--muted); font-size: 12.5px; margin-top: 14px; }
 .desc-pair { font-size: 12.5px; color: var(--muted); margin-top: 9px; }
+.audio-pair { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.audio-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--muted); margin-bottom: 9px;
+}
+.audio-rows { display: flex; flex-direction: column; gap: 8px; }
+.audio-row { display: flex; align-items: center; gap: 10px; }
+.audio-tag {
+  width: 20px; height: 20px; flex: none; display: grid; place-items: center;
+  border-radius: 5px; background: #333944; font-size: 11px; font-weight: 700;
+}
+.audio-tag.a { color: #5b8def; }
+.audio-tag.b { color: #8e6fd8; }
+.audio-row audio { height: 34px; flex: 1; max-width: 460px; }
 """
 
 JS = """
@@ -285,6 +319,52 @@ def render_track(label, info, regions, side, max_duration):
     </div>"""
 
 
+def render_technical(differences, a_info, b_info):
+    """Delivery properties that differ -- HDR vs SDR, bit depth, frame rate.
+
+    Kept visually separate from the timeline because it is a different kind of
+    finding: nothing here means the *edit* changed, and none of it has a
+    timecode. Two files can be identical shot for shot and still be different
+    deliveries.
+    """
+    if not differences:
+        return ""
+
+    rows = []
+    for diff in differences:
+        mark = '<span class="material-dot" title="material difference"></span>' \
+            if diff["material"] else ""
+        rows.append(
+            f"<tr class=\"{'material' if diff['material'] else ''}\">"
+            f"<td>{mark}{esc(diff['label'])}</td>"
+            f"<td>{esc(diff['a'] if diff['a'] is not None else '—')}</td>"
+            f"<td>{esc(diff['b'] if diff['b'] is not None else '—')}</td></tr>"
+        )
+
+    material = sum(1 for d in differences if d["material"])
+    a_range = (a_info.get("technical") or {}).get("dynamic_range")
+    b_range = (b_info.get("technical") or {}).get("dynamic_range")
+    headline = ""
+    if a_range and b_range and a_range != b_range:
+        headline = (f'<div class="tech-headline">{esc(a_range)} '
+                    f'&nbsp;vs&nbsp; {esc(b_range)}</div>')
+
+    return f"""
+    <div class="panel tech">
+      <h3>Technical differences</h3>
+      {headline}
+      <table class="tech-table">
+        <thead><tr><th>Property</th><th>A</th><th>B</th></tr></thead>
+        <tbody>{''.join(rows)}</tbody>
+      </table>
+      <div class="tech-note">
+        {len(differences)} difference(s), {material} material.
+        These are delivery properties, not edit changes &mdash; they have no
+        timecode and do not appear on the timelines below.
+      </div>
+    </div>"""
+
+
 def render_ruler(max_duration, ticks=8):
     marks = []
     for i in range(ticks + 1):
@@ -337,6 +417,20 @@ def render_card(idx, region, thumbs):
 
     # Open by default: the thumbnails are the report's substance when there are
     # no descriptions, so they should be on screen without a click.
+    audio = []
+    for side, tag in (("a", "A"), ("b", "B")):
+        clip = thumbs.get(f"audio_{side}")
+        if clip:
+            audio.append(
+                f'<div class="audio-row"><span class="audio-tag {side}">{tag}</span>'
+                f'<audio controls preload="none" '
+                f'src="data:audio/mpeg;base64,{clip}"></audio></div>'
+            )
+    audio_html = (
+        f'<div class="audio-pair"><div class="audio-label">Listen</div>'
+        f'<div class="audio-rows">{"".join(audio)}</div></div>'
+    ) if audio else ""
+
     return f"""
     <div class="card open" id="r{idx}" style="border-left-color:{colour}">
       <div class="card-head" onclick="toggle('r{idx}')">
@@ -353,6 +447,7 @@ def render_card(idx, region, thumbs):
         <div class="blurb">{esc(TYPE_BLURBS.get(kind, ''))}</div>
         {exp_html}
         <div class="sides">{''.join(sides)}</div>
+        {audio_html}
       </div>
     </div>"""
 
@@ -387,18 +482,23 @@ def render_html(report, thumbnails):
     else:
         body = """
         <div class="panel empty">
-          <div class="big">No differences found</div>
+          <div class="big">No edit differences</div>
           <div class="small">The two versions align shot for shot, with matching
-          picture and audio throughout.</div>
+          picture and audio throughout.""" + (
+            " Their delivery properties differ, though &mdash; see above."
+            if report.get("technical_differences") else ""
+          ) + """</div>
         </div>"""
 
-    return f"""<title>Version diff &mdash; {esc(a_info['source'])} vs {esc(b_info['source'])}</title>
+    return f"""<title>Vidiff &mdash; {esc(a_info['source'])} vs {esc(b_info['source'])}</title>
 <style>{CSS}</style>
 <div class="wrap">
-  <h1>Version diff</h1>
+  <h1>Vidiff</h1>
   <p class="sub">{esc(a_info['source'])} &nbsp;vs&nbsp; {esc(b_info['source'])}
      &nbsp;&middot;&nbsp; {len(regions)} changed region(s)
      &nbsp;&middot;&nbsp; {esc(delta_text)}</p>
+
+  {render_technical(report.get("technical_differences"), a_info, b_info)}
 
   <div class="panel">
     {render_track("A", a_info, regions, "a", max_duration)}

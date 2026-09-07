@@ -75,11 +75,28 @@ export interface Region {
   explanation: string | null;
 }
 
+export interface TechnicalDiff {
+  field: string;
+  label: string;
+  a: string | number | null;
+  b: string | number | null;
+  material: boolean;
+}
+
+export interface TechnicalProps {
+  dynamic_range: string | null;
+  resolution: string | null;
+  frame_rate: number | null;
+  bit_depth: number | null;
+  [key: string]: string | number | boolean | null | undefined;
+}
+
 export interface VersionInfo {
   source: string;
   proxy: string | null;
   duration_seconds: number;
   shot_count: number;
+  technical?: TechnicalProps | null;
 }
 
 export interface Report {
@@ -89,6 +106,7 @@ export interface Report {
   audio_change_threshold: number;
   explained: boolean;
   region_count: number;
+  technical_differences?: TechnicalDiff[];
   summary: Record<RegionType, number>;
   regions: Region[];
 }
@@ -96,6 +114,9 @@ export interface Report {
 export interface RegionThumbs {
   thumbnails_a: string[];
   thumbnails_b: string[];
+  /** Base64 MP3, inlined for audio_changed regions only. */
+  audio_a?: string | null;
+  audio_b?: string | null;
 }
 
 export interface Health {

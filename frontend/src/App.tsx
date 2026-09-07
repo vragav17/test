@@ -13,10 +13,22 @@ export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [jobs, setJobs] = useState<JobListEntry[]>([]);
 
+  // Polled, not fetched once: Ollama is commonly started *after* this page is
+  // open, and a badge that says "offline" until the next reload is worse than
+  // no badge at all. check_tools() is cached server-side, so this is cheap.
   useEffect(() => {
-    getHealth()
-      .then(setHealth)
-      .catch(() => setHealth(null));
+    let alive = true;
+    const refresh = () => {
+      getHealth()
+        .then((h) => alive && setHealth(h))
+        .catch(() => alive && setHealth(null));
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 10000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
   }, []);
 
   // The sidebar reflects work started elsewhere too, so poll it rather than

@@ -1,4 +1,4 @@
-# Video version diff
+# Vidiff
 
 Takes two video files that are different cuts of the same title and produces a
 timecoded, plain-English report of what changed between them.
@@ -52,7 +52,7 @@ download.
 
 ## UI
 
-There is also a local web app over the same pipeline, if you would rather not
+**Vidiff** — a local web app over the same pipeline, if you would rather not
 drive four CLIs by hand. The frontend is **React + TypeScript, built with
 Vite**; the backend is FastAPI.
 
@@ -94,6 +94,25 @@ Fingerprints are cached by (file signature, cut threshold), so comparing a
 third version against one you have already fingerprinted skips that lane
 entirely — it shows as `reused`. That makes the three-cut case (theatrical vs
 special vs extended) three cheap pairwise jobs rather than six full runs.
+
+Changes are **grouped by kind** rather than listed flat — one collapsible
+section per change type, each with its own count and total footprint, so the
+first question ("what kinds of things changed?") is answered before any
+individual timecode. A one-line verdict sits above them: *"1 removed, 1 audio
+changed, and B is 20.1s shorter."*
+
+**You can hear the audio.** Every region gets play buttons for both sides. This
+matters most for `audio_changed`, where the two thumbnails are identical by
+definition — listening is the only way a person can confirm the finding. In the
+app clips are cut on demand and cached; in the standalone report they are
+inlined as base64 for `audio_changed` regions, so an emailed report plays with
+no server.
+
+Clips are MP3, not AAC. AAC is the better codec but it is patent-encumbered,
+and open-source Chromium builds ship without it — an `<audio>` element fed AAC
+there fails with `DEMUXER_ERROR_NO_SUPPORTED_STREAMS`, which is exactly what
+happened when this was first built. MP3 plays everywhere, which is what a
+report meant to be forwarded needs.
 
 Descriptions are best-effort in the UI: if Ollama is unreachable the `describe`
 stage is marked failed with the reason and the job still finishes with a full
@@ -337,6 +356,53 @@ Blur is invisible because it preserves the low frequencies the DCT keeps.
 Colour is invisible because the image is greyscaled before hashing. A regrade,
 a colourisation or a soft-focus pass produces a file this tool correctly calls
 identical — a real property of the system, not a bug.
+
+## HDR vs SDR, and other technical differences
+
+A supplier delivering the same title as HDR10 and SDR is a real version pair,
+but it is **not an edit difference** — and the shot alignment correctly says so.
+
+Measured on a real PQ/BT.2020 10-bit master and its Hable-tonemapped BT.709
+SDR counterpart: **max phash distance 6/64, mean 3.4, zero regions**. That is
+the right answer to "did the cut change?" (it did not) and a useless answer to
+"are these the same delivery?" (they are not).
+
+So the comparison has a second, separate axis. `fingerprint.py` probes the
+**source** file — never the 480p proxy, which is transcoded to 8-bit BT.709 and
+would report every HDR master as SDR — and records:
+
+| | |
+| --- | --- |
+| Dynamic range | HDR10 (PQ), HLG, SDR, or `untagged` |
+| Colour | transfer characteristic, primaries, matrix, range |
+| Format | resolution, frame rate, bit depth, pixel format |
+| Codecs | video codec, audio codec, channels, sample rate |
+
+`diff.py` compares them and reports the differences in their own section,
+above the timelines and clearly marked as having no timecode:
+
+```
+  TECHNICAL DIFFERENCES (6, 4 material)
+   * Dynamic range          A: HDR10 (PQ)          B: SDR (BT.709)
+   * Bit depth              A: 10                  B: 8
+   * Transfer (TRC)         A: smpte2084           B: bt709
+   * Colour primaries       A: bt2020              B: bt709
+     Matrix                 A: bt2020nc            B: bt709
+     Pixel format           A: yuv420p10le         B: yuv420p
+```
+
+Fields marked `*` are **material** — they change what the file *is*, rather
+than how it happened to be encoded. A matrix or pixel-format difference follows
+from the dynamic range; a dynamic range or frame rate difference is its own
+finding.
+
+An untagged file reports as `untagged` rather than being assumed SDR. Missing
+colour tagging is itself a QC finding, and quietly calling it BT.709 would hide
+it.
+
+When two files differ technically but not by edit, the report says **"No edit
+differences"** and points at the technical section — never "no differences",
+which would be false.
 
 ## Out of scope
 
