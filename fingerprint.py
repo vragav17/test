@@ -29,6 +29,7 @@ from vdiff_common import (
     format_tc,
     has_audio_stream,
     log,
+    probe_technical,
     run,
 )
 
@@ -190,6 +191,12 @@ def fingerprint(src, threshold=DEFAULT_THRESHOLD):
     log(f"Fingerprinting {src}")
     check_tools()
 
+    # Probed from the source, not the proxy: the proxy is transcoded to 8-bit
+    # BT.709, so an HDR master would read back as SDR.
+    technical = probe_technical(src)
+    log(f"  [probe]  {technical['dynamic_range']}, {technical['resolution']}, "
+        f"{technical['bit_depth']}-bit, {technical['video_codec']}")
+
     proxy = build_proxy(src)
     duration = ffprobe_duration(proxy)
 
@@ -210,6 +217,7 @@ def fingerprint(src, threshold=DEFAULT_THRESHOLD):
         "duration_seconds": round(duration, 3),
         "shot_count": len(shots),
         "threshold": threshold,
+        "technical": technical,
         "shots": [
             {
                 "index": i,

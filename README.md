@@ -338,6 +338,53 @@ Colour is invisible because the image is greyscaled before hashing. A regrade,
 a colourisation or a soft-focus pass produces a file this tool correctly calls
 identical — a real property of the system, not a bug.
 
+## HDR vs SDR, and other technical differences
+
+A supplier delivering the same title as HDR10 and SDR is a real version pair,
+but it is **not an edit difference** — and the shot alignment correctly says so.
+
+Measured on a real PQ/BT.2020 10-bit master and its Hable-tonemapped BT.709
+SDR counterpart: **max phash distance 6/64, mean 3.4, zero regions**. That is
+the right answer to "did the cut change?" (it did not) and a useless answer to
+"are these the same delivery?" (they are not).
+
+So the comparison has a second, separate axis. `fingerprint.py` probes the
+**source** file — never the 480p proxy, which is transcoded to 8-bit BT.709 and
+would report every HDR master as SDR — and records:
+
+| | |
+| --- | --- |
+| Dynamic range | HDR10 (PQ), HLG, SDR, or `untagged` |
+| Colour | transfer characteristic, primaries, matrix, range |
+| Format | resolution, frame rate, bit depth, pixel format |
+| Codecs | video codec, audio codec, channels, sample rate |
+
+`diff.py` compares them and reports the differences in their own section,
+above the timelines and clearly marked as having no timecode:
+
+```
+  TECHNICAL DIFFERENCES (6, 4 material)
+   * Dynamic range          A: HDR10 (PQ)          B: SDR (BT.709)
+   * Bit depth              A: 10                  B: 8
+   * Transfer (TRC)         A: smpte2084           B: bt709
+   * Colour primaries       A: bt2020              B: bt709
+     Matrix                 A: bt2020nc            B: bt709
+     Pixel format           A: yuv420p10le         B: yuv420p
+```
+
+Fields marked `*` are **material** — they change what the file *is*, rather
+than how it happened to be encoded. A matrix or pixel-format difference follows
+from the dynamic range; a dynamic range or frame rate difference is its own
+finding.
+
+An untagged file reports as `untagged` rather than being assumed SDR. Missing
+colour tagging is itself a QC finding, and quietly calling it BT.709 would hide
+it.
+
+When two files differ technically but not by edit, the report says **"No edit
+differences"** and points at the technical section — never "no differences",
+which would be false.
+
 ## Out of scope
 
 No cloud services or API keys. No fingerprint database or dedup index. No web

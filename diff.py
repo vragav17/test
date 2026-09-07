@@ -26,6 +26,7 @@ from vdiff_common import (
     die,
     extract_frames,
     format_tc,
+    compare_technical,
     log,
     png_to_jpeg_b64,
 )
@@ -110,16 +111,32 @@ def build_thumbnails(regions, a_fp, b_fp, a_proxy, b_proxy):
     return thumbs
 
 
-def print_summary(regions, a_fp, b_fp, explanations=None):
+def print_summary(regions, a_fp, b_fp, explanations=None, technical=None):
     log("\n" + "=" * 78)
     log(f"DIFF  A: {a_fp['source']}  ({format_tc(a_fp['duration_seconds'])}, "
         f"{a_fp['shot_count']} shots)")
     log(f"      B: {b_fp['source']}  ({format_tc(b_fp['duration_seconds'])}, "
         f"{b_fp['shot_count']} shots)")
     log("=" * 78)
+
+    if technical:
+        material = [d for d in technical if d["material"]]
+        log(f"  TECHNICAL DIFFERENCES ({len(technical)}, "
+            f"{len(material)} material)")
+        for diff in technical:
+            marker = "*" if diff["material"] else " "
+            log(f"   {marker} {diff['label']:<22} A: {str(diff['a']):<28} "
+                f"B: {diff['b']}")
+        log("  " + "-" * 74)
+        log("  These are delivery properties, not edit changes. They do not")
+        log("  appear on the timeline below.")
+        log("=" * 78)
+
     if not regions:
-        log("  No differences found. The two versions align shot for shot,")
+        log("  No edit differences. The two versions align shot for shot,")
         log("  with matching picture and audio throughout.")
+        if technical:
+            log("  (But see the technical differences above -- these are not the\n   same delivery.)")
         log("=" * 78)
         return
     for i, region in enumerate(regions):
@@ -178,23 +195,28 @@ def run_diff(fp_a_path, fp_b_path, out_path, explain=False,
         with Stage("stage 6", f"local descriptions via {model}"):
             explanations = describe_regions(regions, thumbs, model, ollama_url)
 
+    technical = compare_technical(a_fp.get("technical"), b_fp.get("technical"))
+
     report = {
         "version_a": {
             "source": a_fp["source"],
             "proxy": a_fp.get("proxy"),
             "duration_seconds": a_fp["duration_seconds"],
             "shot_count": a_fp["shot_count"],
+            "technical": a_fp.get("technical"),
         },
         "version_b": {
             "source": b_fp["source"],
             "proxy": b_fp.get("proxy"),
             "duration_seconds": b_fp["duration_seconds"],
             "shot_count": b_fp["shot_count"],
+            "technical": b_fp.get("technical"),
         },
         "alignment_score": score,
         "audio_change_threshold": audio_threshold,
         "explained": bool(explain),
         "region_count": len(regions),
+        "technical_differences": technical,
         "summary": {
             kind: sum(1 for r in regions if r.type == kind)
             for kind in ("delete", "insert", "replace", "audio_changed")
@@ -232,7 +254,7 @@ def run_diff(fp_a_path, fp_b_path, out_path, explain=False,
     with open(sidecar, "w") as fh:
         json.dump({"regions": thumbs}, fh)
 
-    print_summary(regions, a_fp, b_fp, explanations)
+    print_summary(regions, a_fp, b_fp, explanations, technical)
     log(f"\nWrote {out_path} and {sidecar} in {time.time() - t_start:.1f}s")
     return report
 

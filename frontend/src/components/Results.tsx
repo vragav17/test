@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { REGION_TYPES, TYPE_COLOR, TYPE_LABEL, fmtTc, shortTc } from '../format';
 import type { Region, RegionThumbs, RegionType, Report, VersionInfo } from '../types';
 import { RegionCard } from './RegionCard';
+import { TechnicalDiffs } from './TechnicalDiffs';
 
 function Track({
   tag, info, regions, side, maxDuration, onPick,
@@ -110,6 +111,12 @@ export function Results({ report, thumbs }: { report: Report; thumbs: RegionThum
         </div>
       </div>
 
+      <TechnicalDiffs
+        differences={report.technical_differences ?? []}
+        a={report.version_a}
+        b={report.version_b}
+      />
+
       <div className="panel">
         <h3>Timelines (shared scale)</h3>
         <Track tag="A" info={report.version_a} regions={regions} side="a" maxDuration={maxDuration} onPick={pick} />
@@ -136,8 +143,10 @@ export function Results({ report, thumbs }: { report: Report; thumbs: RegionThum
 
       {regions.length === 0 ? (
         <div className="banner ok">
-          No differences found. The two versions align shot for shot, with matching picture and
-          audio throughout.
+          No edit differences. The two versions align shot for shot, with matching picture
+          and audio throughout.
+          {(report.technical_differences?.length ?? 0) > 0
+            && ' Their delivery properties differ, though — see above.'}
         </div>
       ) : (
         <>

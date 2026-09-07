@@ -198,6 +198,156 @@ def ffprobe_duration(path):
         raise ToolError(f"Could not read duration from {path!r} (ffprobe said {text!r})")
 
 
+# --------------------------------------------------------------------------
+# technical properties (HDR/SDR, colour, codecs)
+# --------------------------------------------------------------------------
+
+# Transfer characteristics that mean high dynamic range.
+HDR_TRANSFERS = {
+    "smpte2084": "HDR10 (PQ)",
+    "arib-std-b67": "HLG",
+}
+
+# Field order for reporting; the first entries are what a QC operator looks at.
+TECHNICAL_FIELDS = [
+    ("dynamic_range", "Dynamic range"),
+    ("resolution", "Resolution"),
+    ("frame_rate", "Frame rate"),
+    ("bit_depth", "Bit depth"),
+    ("color_transfer", "Transfer (TRC)"),
+    ("color_primaries", "Colour primaries"),
+    ("color_space", "Matrix"),
+    ("color_range", "Range"),
+    ("pix_fmt", "Pixel format"),
+    ("video_codec", "Video codec"),
+    ("audio_codec", "Audio codec"),
+    ("audio_channels", "Audio channels"),
+    ("audio_sample_rate", "Audio sample rate"),
+]
+
+# A difference in any of these changes what the file *is*, not merely how it
+# was encoded, so the report calls them out separately.
+MATERIAL_FIELDS = {
+    "dynamic_range", "resolution", "frame_rate", "bit_depth",
+    "color_transfer", "color_primaries", "audio_channels",
+}
+
+
+def _bit_depth(video):
+    raw = video.get("bits_per_raw_sample")
+    if raw and str(raw).isdigit():
+        return int(raw)
+    # Fall back to the pixel format, which encodes depth in its name.
+    pix = video.get("pix_fmt") or ""
+    for depth in ("12", "10", "9"):
+        if depth in pix:
+            return int(depth)
+    return 8 if pix else None
+
+
+def _frame_rate(video):
+    text = video.get("r_frame_rate") or ""
+    if "/" in text:
+        num, den = text.split("/", 1)
+        try:
+            if float(den):
+                return round(float(num) / float(den), 3)
+        except ValueError:
+            return None
+    return None
+
+
+def classify_dynamic_range(transfer, primaries, bit_depth):
+    """Name the dynamic range from the colour tagging.
+
+    Deliberately reports "untagged" rather than guessing SDR: an untagged file
+    is a real QC finding, and silently calling it SDR would hide it.
+    """
+    if transfer in HDR_TRANSFERS:
+        return HDR_TRANSFERS[transfer]
+    if not transfer or transfer == "unknown":
+        if primaries == "bt2020" or (bit_depth or 0) >= 10:
+            return "untagged (wide gamut or 10-bit)"
+        return "untagged"
+    if primaries == "bt2020":
+        return "SDR (BT.2020 primaries)"
+    return "SDR (BT.709)"
+
+
+def probe_technical(path):
+    """Colour, codec and container properties of a video.
+
+    Always probe the ORIGINAL file, never the 480p proxy: the proxy is
+    transcoded to 8-bit BT.709, so every HDR property would read as SDR.
+    """
+    out = run(
+        ["ffprobe", "-v", "error", "-print_format", "json",
+         "-show_streams", "-show_format", path],
+        capture_stdout=True,
+    )
+    try:
+        data = json.loads(out)
+    except ValueError as exc:
+        raise ToolError(f"Could not parse ffprobe output for {path!r}: {exc}") from exc
+
+    streams = data.get("streams", [])
+    video = next((s for s in streams if s.get("codec_type") == "video"), {})
+    audio = next((s for s in streams if s.get("codec_type") == "audio"), {})
+
+    def tag(value):
+        return None if value in (None, "", "unknown") else value
+
+    transfer = tag(video.get("color_transfer"))
+    primaries = tag(video.get("color_primaries"))
+    depth = _bit_depth(video)
+
+    width, height = video.get("width"), video.get("height")
+    props = {
+        "dynamic_range": classify_dynamic_range(transfer, primaries, depth),
+        "resolution": f"{width}x{height}" if width and height else None,
+        "frame_rate": _frame_rate(video),
+        "bit_depth": depth,
+        "color_transfer": transfer,
+        "color_primaries": primaries,
+        "color_space": tag(video.get("color_space")),
+        "color_range": tag(video.get("color_range")),
+        "pix_fmt": tag(video.get("pix_fmt")),
+        "video_codec": tag(video.get("codec_name")),
+        "audio_codec": tag(audio.get("codec_name")),
+        "audio_channels": audio.get("channels"),
+        "audio_sample_rate": (int(audio["sample_rate"])
+                              if str(audio.get("sample_rate", "")).isdigit() else None),
+    }
+
+    # Mastering-display and content-light metadata, when the container carries it.
+    for side in video.get("side_data_list") or []:
+        kind = side.get("side_data_type", "")
+        if "Mastering display" in kind:
+            props["mastering_display"] = True
+        elif "Content light level" in kind:
+            props["max_cll"] = side.get("max_content")
+            props["max_fall"] = side.get("max_average")
+    return props
+
+
+def compare_technical(a, b):
+    """Field-by-field differences between two technical property sets."""
+    if not a or not b:
+        return []
+    diffs = []
+    for key, label in TECHNICAL_FIELDS:
+        left, right = a.get(key), b.get(key)
+        if left != right:
+            diffs.append({
+                "field": key,
+                "label": label,
+                "a": left,
+                "b": right,
+                "material": key in MATERIAL_FIELDS,
+            })
+    return diffs
+
+
 def has_audio_stream(path):
     out = run(
         [
