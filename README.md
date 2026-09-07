@@ -101,10 +101,14 @@ first question ("what kinds of things changed?") is answered before any
 individual timecode. A one-line verdict sits above them: *"1 removed, 1 audio
 changed, and B is 20.1s shorter."*
 
-**You can hear the audio.** Every region gets play buttons for both sides. This
-matters most for `audio_changed`, where the two thumbnails are identical by
-definition — listening is the only way a person can confirm the finding. In the
-app clips are cut on demand and cached; in the standalone report they are
+**You can hear the audio.** Each version column carries its own compact play
+button, directly under that version's thumbnails — so A and B sit side by side
+and you can flip between them. Starting one stops the other, because you are
+A/B-ing the same moment rather than mixing two.
+
+This matters most for `audio_changed`, where the two thumbnails are identical
+by definition — listening is the only way a person can confirm the finding. In
+the app clips are cut on demand and cached; in the standalone report they are
 inlined as base64 for `audio_changed` regions, so an emailed report plays with
 no server.
 
