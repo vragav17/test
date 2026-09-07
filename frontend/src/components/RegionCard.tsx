@@ -1,17 +1,23 @@
 import { useEffect, useState } from 'react';
 
-import { TYPE_BLURB, TYPE_COLOR, TYPE_LABEL, fmtTc } from '../format';
+import { TYPE_COLOR, TYPE_LABEL, fmtTc } from '../format';
+import { AudioPair } from './AudioPair';
 import type { Region, RegionThumbs } from '../types';
 
 interface Props {
   index: number;
   region: Region;
   thumbs: RegionThumbs | undefined;
+  jobId?: string;
+  /** Inside a typed group the kind is already on the group header. */
+  showType?: boolean;
   flashKey: number;
   flashed: boolean;
 }
 
-export function RegionCard({ index, region, thumbs, flashKey, flashed }: Props) {
+export function RegionCard({
+  index, region, thumbs, jobId, flashKey, flashed, showType = true,
+}: Props) {
   // Open by default: the thumbnails are the substance when there are no
   // descriptions, so they should be on screen without a click.
   const [open, setOpen] = useState(true);
@@ -35,9 +41,13 @@ export function RegionCard({ index, region, thumbs, flashKey, flashed }: Props) 
     >
       <div className="rc-head" onClick={() => setOpen((v) => !v)} role="button" tabIndex={0}>
         <span className="chev">▶</span>
-        <span className="swatch" style={{ background: colour }} />
-        <span className="rc-type">{TYPE_LABEL[region.type] ?? region.type}</span>
-        <span className="none">{region.shot_count} shot(s)</span>
+        {showType && <span className="swatch" style={{ background: colour }} />}
+        {showType && (
+          <span className="rc-type">{TYPE_LABEL[region.type] ?? region.type}</span>
+        )}
+        <span className={showType ? 'none' : 'rc-type'}>
+          {region.shot_count} shot{region.shot_count === 1 ? '' : 's'}
+        </span>
         <div className="rc-times">
           A {fmtTc(region.a_start)} → {fmtTc(region.a_end)}
           <br />
@@ -46,7 +56,6 @@ export function RegionCard({ index, region, thumbs, flashKey, flashed }: Props) 
       </div>
 
       <div className="rc-body">
-        <div className="muted">{TYPE_BLURB[region.type]}</div>
         <div className={`explanation${region.explanation ? '' : ' absent'}`}>
           {region.explanation ??
             'No description (re-run with descriptions enabled to add one).'}
@@ -95,6 +104,14 @@ export function RegionCard({ index, region, thumbs, flashKey, flashed }: Props) 
             );
           })}
         </div>
+        <AudioPair
+          jobId={jobId}
+          regionIndex={index}
+          hasA={region.a_end - region.a_start > 0.05}
+          hasB={region.b_end - region.b_start > 0.05}
+          inlineA={thumbs?.audio_a}
+          inlineB={thumbs?.audio_b}
+        />
       </div>
     </div>
   );

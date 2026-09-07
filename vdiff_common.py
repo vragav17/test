@@ -503,6 +503,60 @@ def extract_frames(proxy, times, duration=None, workers=None):
 # --------------------------------------------------------------------------
 
 
+def extract_audio_clip(proxy, start, end, bitrate="96k", max_seconds=30.0):
+    """Cut [start, end) of the proxy's audio to a small MP3 clip; return its path.
+
+    An `audio_changed` region shows the *same* picture on both sides -- the
+    thumbnails are identical by definition. Hearing the two clips is the only
+    way for a person to confirm the finding, so the report offers them.
+
+    MP3 rather than AAC deliberately. AAC is the better codec, but it is
+    patent-encumbered and open-source Chromium builds ship without it -- an
+    <audio> element fed AAC there fails with DEMUXER_ERROR_NO_SUPPORTED_STREAMS
+    (measured). MP3 plays in every browser, which matters because the
+    standalone report is meant to be emailable to someone whose browser we do
+    not control.
+
+    Returns None when the file has no audio, rather than raising: a missing
+    clip should degrade the player, not fail the report.
+    """
+    duration = min(max(end - start, 0.0), max_seconds)
+    if duration <= 0.05:
+        return None
+    if not has_audio_stream(proxy):
+        return None
+
+    sig = file_signature(proxy)
+    folder = ensure_cache("clips", sig)
+    path = os.path.join(
+        folder, f"{int(start * 1000):09d}_{int(duration * 1000):09d}.mp3"
+    )
+    if os.path.isfile(path) and os.path.getsize(path) > 0:
+        return path
+
+    tmp = path + f".{os.getpid()}.partial.mp3"
+    try:
+        run([
+            "ffmpeg", "-nostdin", "-v", "error", "-y",
+            "-ss", f"{start:.3f}", "-t", f"{duration:.3f}", "-i", proxy,
+            "-vn", "-c:a", "libmp3lame", "-b:a", bitrate, tmp,
+        ])
+    except ToolError as exc:
+        log(f"    WARNING: could not cut audio at {start:.2f}s: {exc}")
+        return None
+    os.replace(tmp, path)
+    return path
+
+
+def audio_clip_b64(proxy, start, end, **kwargs):
+    """The same clip, base64-encoded for inlining into a standalone report."""
+    path = extract_audio_clip(proxy, start, end, **kwargs)
+    if not path:
+        return None
+    with open(path, "rb") as fh:
+        return base64.b64encode(fh.read()).decode("ascii")
+
+
 def png_to_jpeg_b64(png_bytes, max_width=320, quality=70):
     """Downscale a PNG frame and return it as a base64 JPEG string."""
     from PIL import Image

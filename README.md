@@ -1,4 +1,4 @@
-# Video version diff
+# Vidiff
 
 Takes two video files that are different cuts of the same title and produces a
 timecoded, plain-English report of what changed between them.
@@ -52,7 +52,7 @@ download.
 
 ## UI
 
-There is also a local web app over the same pipeline, if you would rather not
+**Vidiff** — a local web app over the same pipeline, if you would rather not
 drive four CLIs by hand. The frontend is **React + TypeScript, built with
 Vite**; the backend is FastAPI.
 
@@ -94,6 +94,25 @@ Fingerprints are cached by (file signature, cut threshold), so comparing a
 third version against one you have already fingerprinted skips that lane
 entirely — it shows as `reused`. That makes the three-cut case (theatrical vs
 special vs extended) three cheap pairwise jobs rather than six full runs.
+
+Changes are **grouped by kind** rather than listed flat — one collapsible
+section per change type, each with its own count and total footprint, so the
+first question ("what kinds of things changed?") is answered before any
+individual timecode. A one-line verdict sits above them: *"1 removed, 1 audio
+changed, and B is 20.1s shorter."*
+
+**You can hear the audio.** Every region gets play buttons for both sides. This
+matters most for `audio_changed`, where the two thumbnails are identical by
+definition — listening is the only way a person can confirm the finding. In the
+app clips are cut on demand and cached; in the standalone report they are
+inlined as base64 for `audio_changed` regions, so an emailed report plays with
+no server.
+
+Clips are MP3, not AAC. AAC is the better codec but it is patent-encumbered,
+and open-source Chromium builds ship without it — an `<audio>` element fed AAC
+there fails with `DEMUXER_ERROR_NO_SUPPORTED_STREAMS`, which is exactly what
+happened when this was first built. MP3 plays everywhere, which is what a
+report meant to be forwarded needs.
 
 Descriptions are best-effort in the UI: if Ollama is unreachable the `describe`
 stage is marked failed with the reason and the job still finishes with a full

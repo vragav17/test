@@ -15,7 +15,7 @@ export function TopBar({ health }: { health: Health | null }) {
       <div className="brand">
         <span className="brand-mark" />
         <div>
-          <div className="brand-name">Version Diff</div>
+          <div className="brand-name">Vidiff</div>
           <div className="brand-sub">Local shot-level comparison of two cuts</div>
         </div>
       </div>

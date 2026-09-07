@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from jobs import STAGE_DEFS, JobStore, browse
-from vdiff_common import ToolError, check_tools
+from vdiff_common import ToolError, check_tools, extract_audio_clip
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIST = os.path.join(BASE_DIR, "frontend", "dist")
@@ -36,7 +36,7 @@ def ui_root():
         return FRONTEND_DIST, "react"
     return STATIC_DIR, "fallback"
 
-app = FastAPI(title="Version Diff")
+app = FastAPI(title="Vidiff")
 store = JobStore()
 
 
@@ -195,6 +195,42 @@ async def job_events(job_id: str, since: int = 0):
     )
 
 
+@app.get("/api/jobs/{job_id}/audio/{region_index}/{side}")
+def region_audio(job_id: str, region_index: int, side: str):
+    """The audio under one side of one region, cut on demand.
+
+    Extracted lazily rather than during the job: most regions are never played,
+    and cutting every one up front would slow every comparison for a feature
+    used on a few. Clips are cached, so a second play is instant.
+    """
+    if side not in ("a", "b"):
+        raise HTTPException(status_code=400, detail="side must be 'a' or 'b'")
+
+    path = store.report_path(job_id, "report.json")
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="No report for that job yet")
+    with open(path) as fh:
+        report = json.load(fh)
+
+    regions = report.get("regions", [])
+    if not 0 <= region_index < len(regions):
+        raise HTTPException(status_code=404, detail="No such region")
+    region = regions[region_index]
+
+    start, end = region[f"{side}_start"], region[f"{side}_end"]
+    if end - start <= 0.05:
+        raise HTTPException(status_code=404, detail="This side has no content to play")
+
+    proxy = (report.get(f"version_{side}") or {}).get("proxy")
+    if not proxy or not os.path.isfile(proxy):
+        raise HTTPException(status_code=404, detail="Proxy for that version is gone")
+
+    clip = extract_audio_clip(proxy, start, end)
+    if not clip:
+        raise HTTPException(status_code=404, detail="That version has no audio track")
+    return FileResponse(clip, media_type="audio/mpeg")
+
+
 def _artifact(job_id, name, media_type):
     path = store.report_path(job_id, name)
     if not os.path.isfile(path):
@@ -249,7 +285,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Local UI for the video version diff pipeline.")
+    parser = argparse.ArgumentParser(description="Vidiff -- local UI for the video version diff pipeline.")
     parser.add_argument("--host", default="127.0.0.1",
                         help="bind address (default 127.0.0.1; do not expose publicly)")
     parser.add_argument("--port", type=int, default=8765)
@@ -257,7 +293,7 @@ def main(argv=None):
 
     import uvicorn
     _, which = ui_root()
-    print(f"\n  Version Diff UI  ->  http://{args.host}:{args.port}", flush=True)
+    print(f"\n  Vidiff  ->  http://{args.host}:{args.port}", flush=True)
     if which == "react":
         print("  serving the built React app (frontend/dist)\n", flush=True)
     else:

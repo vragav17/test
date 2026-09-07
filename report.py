@@ -160,6 +160,20 @@ h1 { font-size: 22px; margin: 0 0 4px; font-weight: 600; letter-spacing: -0.01em
 }
 .tech-note { color: var(--muted); font-size: 12.5px; margin-top: 14px; }
 .desc-pair { font-size: 12.5px; color: var(--muted); margin-top: 9px; }
+.audio-pair { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.audio-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--muted); margin-bottom: 9px;
+}
+.audio-rows { display: flex; flex-direction: column; gap: 8px; }
+.audio-row { display: flex; align-items: center; gap: 10px; }
+.audio-tag {
+  width: 20px; height: 20px; flex: none; display: grid; place-items: center;
+  border-radius: 5px; background: #333944; font-size: 11px; font-weight: 700;
+}
+.audio-tag.a { color: #5b8def; }
+.audio-tag.b { color: #8e6fd8; }
+.audio-row audio { height: 34px; flex: 1; max-width: 460px; }
 """
 
 JS = """
@@ -403,6 +417,20 @@ def render_card(idx, region, thumbs):
 
     # Open by default: the thumbnails are the report's substance when there are
     # no descriptions, so they should be on screen without a click.
+    audio = []
+    for side, tag in (("a", "A"), ("b", "B")):
+        clip = thumbs.get(f"audio_{side}")
+        if clip:
+            audio.append(
+                f'<div class="audio-row"><span class="audio-tag {side}">{tag}</span>'
+                f'<audio controls preload="none" '
+                f'src="data:audio/mpeg;base64,{clip}"></audio></div>'
+            )
+    audio_html = (
+        f'<div class="audio-pair"><div class="audio-label">Listen</div>'
+        f'<div class="audio-rows">{"".join(audio)}</div></div>'
+    ) if audio else ""
+
     return f"""
     <div class="card open" id="r{idx}" style="border-left-color:{colour}">
       <div class="card-head" onclick="toggle('r{idx}')">
@@ -419,6 +447,7 @@ def render_card(idx, region, thumbs):
         <div class="blurb">{esc(TYPE_BLURBS.get(kind, ''))}</div>
         {exp_html}
         <div class="sides">{''.join(sides)}</div>
+        {audio_html}
       </div>
     </div>"""
 
@@ -461,10 +490,10 @@ def render_html(report, thumbnails):
           ) + """</div>
         </div>"""
 
-    return f"""<title>Version diff &mdash; {esc(a_info['source'])} vs {esc(b_info['source'])}</title>
+    return f"""<title>Vidiff &mdash; {esc(a_info['source'])} vs {esc(b_info['source'])}</title>
 <style>{CSS}</style>
 <div class="wrap">
-  <h1>Version diff</h1>
+  <h1>Vidiff</h1>
   <p class="sub">{esc(a_info['source'])} &nbsp;vs&nbsp; {esc(b_info['source'])}
      &nbsp;&middot;&nbsp; {len(regions)} changed region(s)
      &nbsp;&middot;&nbsp; {esc(delta_text)}</p>

@@ -315,3 +315,57 @@ h3 { font-size: 13px; margin: 0 0 12px; font-weight: 600; color: var(--muted);
   background: #f5a524; margin-right: 8px; vertical-align: middle;
 }
 .tech-note { color: var(--muted); font-size: 12.5px; margin-top: 14px; }
+
+/* ---------------------------------------------------- verdict + grouping */
+
+.verdict {
+  font-size: 18px; font-weight: 600; letter-spacing: -0.01em;
+  margin: 2px 0 18px; color: var(--text);
+}
+
+.group {
+  background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--line); border-radius: 10px;
+  margin-bottom: 14px; overflow: hidden;
+}
+.group-head {
+  display: flex; align-items: center; gap: 11px;
+  padding: 15px 18px; cursor: pointer; user-select: none;
+}
+.group-head:hover { background: var(--panel-2); }
+.group-head .chev { transition: transform .12s; }
+.group-head .chev.open { transform: rotate(90deg); }
+.group-title { margin: 0; font-size: 14px; font-weight: 600;
+               text-transform: none; letter-spacing: 0; color: var(--text); }
+.group-count {
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 999px; padding: 1px 9px; font-size: 12px;
+  font-variant-numeric: tabular-nums; color: var(--muted);
+}
+.group-meta { margin-left: auto; color: var(--muted); font-size: 12.5px;
+              font-variant-numeric: tabular-nums; }
+.group-blurb { color: var(--muted); font-size: 12.5px; margin: 0 18px 4px; }
+.group-body { padding: 8px 14px 14px; }
+.group-body .region-card { border-left-width: 3px; }
+
+.chip-count {
+  margin-left: 7px; background: var(--bg); border-radius: 999px;
+  padding: 0 7px; font-size: 11px; font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------ audio pair */
+
+.audio-pair { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.audio-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--muted); margin-bottom: 9px;
+}
+.audio-rows { display: flex; flex-direction: column; gap: 8px; }
+.audio-row { display: flex; align-items: center; gap: 10px; }
+.audio-tag {
+  width: 20px; height: 20px; flex: none; display: grid; place-items: center;
+  border-radius: 5px; background: var(--panel-2); font-size: 11px; font-weight: 700;
+}
+.audio-tag.a { color: var(--accent); }
+.audio-tag.b { color: var(--audio); }
+.audio-row audio { height: 34px; flex: 1; max-width: 460px; }

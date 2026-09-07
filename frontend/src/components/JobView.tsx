@@ -70,7 +70,7 @@ export function JobView({ jobId }: { jobId: string }) {
 
       <Workflow job={job} />
       <PipelineLog logs={logs} />
-      {report && <Results report={report} thumbs={thumbs} />}
+      {report && <Results report={report} thumbs={thumbs} jobId={jobId} />}
     </>
   );
 }

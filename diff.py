@@ -26,6 +26,7 @@ from vdiff_common import (
     die,
     extract_frames,
     format_tc,
+    audio_clip_b64,
     compare_technical,
     log,
     png_to_jpeg_b64,
@@ -104,10 +105,24 @@ def build_thumbnails(regions, a_fp, b_fp, a_proxy, b_proxy):
         else:
             frames[side] = []
 
-    thumbs = [{"thumbnails_a": [], "thumbnails_b": []} for _ in regions]
+    thumbs = [{"thumbnails_a": [], "thumbnails_b": [],
+               "audio_a": None, "audio_b": None} for _ in regions]
     for side in ("a", "b"):
         for (region_idx, _), png in zip(plan[side], frames[side]):
             thumbs[region_idx][f"thumbnails_{side}"].append(png_to_jpeg_b64(png))
+
+    # Audio is inlined only for audio_changed regions. Those are the ones whose
+    # thumbnails are identical on both sides, so listening is the only way to
+    # confirm them; inlining every region would bloat a standalone report that
+    # is meant to be emailable.
+    for idx, region in enumerate(regions):
+        if region.type != "audio_changed":
+            continue
+        for side, proxy in (("a", a_proxy), ("b", b_proxy)):
+            start = region.a_start if side == "a" else region.b_start
+            end = region.a_end if side == "a" else region.b_end
+            if end - start > 0.05:
+                thumbs[idx][f"audio_{side}"] = audio_clip_b64(proxy, start, end)
     return thumbs
 
 
