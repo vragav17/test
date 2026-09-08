@@ -52,6 +52,11 @@ TV_SHORTEN_MARK = 0.70    # a scene trimmed short here
 TV_SHORTEN_SECONDS = 6.0
 TV_HEIGHT = 576
 
+# v_hdr: the same picture delivered as an HDR10 master. Not an edit change at
+# all -- it exists so the pipeline is tested against the case where tone-mapping
+# is what stands between a clean result and a wall of false `replace` regions.
+HDR_NPL = 100
+
 
 def fixture_encoder():
     """Encoder settings for the fixtures themselves.
@@ -321,6 +326,35 @@ def make_tv(base, out, plan):
             + fixture_encoder() + ["-c:a", "aac", "-b:a", "128k", out])
 
 
+def make_hdr(base, out):
+    """Re-grade v_base as an HDR10 (PQ / BT.2020 / 10-bit) master.
+
+    Same content, same cut. Only the delivery format differs -- which is
+    precisely the case that used to produce false regions, because an
+    untonemapped HDR proxy no longer matches its SDR counterpart.
+    """
+    from vdiff_common import has_filter
+
+    if not has_filter("zscale"):
+        log("  [v_hdr] SKIPPED: ffmpeg has no zscale filter (needs libzimg).")
+        return False
+
+    with Stage("v_hdr", "re-grade to HDR10 (PQ / BT.2020 / 10-bit)"):
+        run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", base,
+             "-vf",
+             "setparams=color_primaries=bt709:color_trc=bt709:"
+             "colorspace=bt709:range=tv,"
+             f"zscale=t=linear:npl={HDR_NPL},format=gbrpf32le,"
+             "zscale=p=bt2020,zscale=t=smpte2084:m=bt2020nc:r=tv,"
+             "format=yuv420p10le",
+             "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+             "-pix_fmt", "yuv420p10le",
+             "-color_primaries", "bt2020", "-color_trc", "smpte2084",
+             "-colorspace", "bt2020nc",
+             "-c:a", "copy", out])
+    return True
+
+
 def make_lowres(base, out):
     with Stage("v_lowres", "re-encode v_base at 360p (picture otherwise identical)"):
         run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", base,
@@ -353,7 +387,7 @@ def main(argv=None):
 
         paths = {name: os.path.join(out_dir, f"{name}.mp4")
                  for name in ("v_base", "v_cut", "v_audiodub", "v_reorder",
-                              "v_lowres", "v_replace", "v_tv")}
+                              "v_lowres", "v_replace", "v_tv", "v_hdr")}
 
         log(f"Building fixtures from {args.source}")
         make_base(args.source, paths["v_base"])
@@ -387,6 +421,7 @@ def main(argv=None):
         else:
             log("  [v_tv] SKIPPED: too few shots to place four separate edits.")
 
+        built_hdr = make_hdr(paths["v_base"], paths["v_hdr"])
         make_lowres(paths["v_base"], paths["v_lowres"])
 
         ground_truth = {
@@ -462,6 +497,14 @@ def main(argv=None):
                 },
             }
 
+        if built_hdr:
+            ground_truth["variants"]["v_hdr"] = {
+                "expected_type": "none",
+                "note": "HDR10 (PQ/BT.2020/10-bit) re-grade of v_base. Same edit, "
+                        "different delivery: the diff must report zero regions and "
+                        "flag the dynamic range as a technical difference.",
+            }
+
         if reorder:
             _, r_t0, r_t1, r_t2 = reorder
             ground_truth["variants"]["v_reorder"] = {
@@ -502,6 +545,8 @@ def main(argv=None):
         log(f"                     shortened {format_tc(tv['shorten'][1] - tv['shorten'][2])} -> "
             f"{format_tc(tv['shorten'][1])} ({tv['shorten'][2]:.2f}s off one shot)")
         log(f"                     rescaled  {TV_HEIGHT}p")
+    if built_hdr:
+        log(f"  v_hdr            HDR10 re-grade, no content change")
     log(f"  v_lowres         360p re-encode, no content change")
     log("=" * 68)
     log(f"\nWrote {gt_path}")

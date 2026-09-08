@@ -18,7 +18,7 @@ from vdiff_common import format_tc, log
 
 TOLERANCE_SECONDS = 2.0
 VARIANTS = ("v_base", "v_cut", "v_audiodub", "v_reorder", "v_lowres",
-            "v_replace", "v_tv")
+            "v_replace", "v_tv", "v_hdr")
 
 
 class Check:
@@ -285,6 +285,38 @@ def check_7_tv(out_dir, ground_truth):
     return check
 
 
+def check_8_hdr(out_dir, ground_truth):
+    check = Check(8, "v_base vs v_hdr yields zero regions, with HDR flagged technically")
+    if ground_truth["variants"].get("v_hdr") is None:
+        check.skipped("v_hdr was not built (ffmpeg has no zscale filter)")
+        return check
+    path = os.path.join(out_dir, "report_v_hdr.json")
+    if not os.path.isfile(path):
+        check.skipped("v_hdr was not diffed")
+        return check
+    report = load(path)
+
+    technical = report.get("technical_differences") or []
+    ranges = [d for d in technical if d["field"] == "dynamic_range"]
+    check.note("ground truth: same edit, delivered as HDR10 instead of SDR")
+    check.note(f"report: {report['region_count']} region(s), "
+               f"{len(technical)} technical difference(s)")
+    if ranges:
+        check.note(f"dynamic range: A {ranges[0]['a']}  ->  B {ranges[0]['b']}")
+
+    if report["region_count"] != 0:
+        kinds = ", ".join(f"{k}={v}" for k, v in report["summary"].items() if v)
+        check.note(f"expected zero regions but got {kinds} -- an untonemapped HDR "
+                   f"proxy drifts out of the match band and fakes `replace` regions")
+        return check
+    if not ranges:
+        check.note("expected the dynamic range difference to be reported technically")
+        return check
+    check.passed("tone-mapped to a common space, so the picture compares like "
+                 "with like; the format difference is reported, not the timeline")
+    return check
+
+
 def check_4_html(out_dir):
     check = Check(4, "report.html is self-contained and shows both timelines with thumbnails")
     path = os.path.join(out_dir, "report_v_cut.html")
@@ -373,7 +405,7 @@ def main(argv=None):
 
     log("\nRunning the pipeline ...")
     for variant in ("v_cut", "v_audiodub", "v_reorder", "v_lowres",
-                    "v_replace", "v_tv"):
+                    "v_replace", "v_tv", "v_hdr"):
         fp = os.path.join(args.out, f"{variant}.json")
         if not os.path.isfile(fp):
             continue
@@ -389,6 +421,7 @@ def main(argv=None):
         check_5_explain(args.out, args.model, args.ollama_url),
         check_6_replace(args.out, ground_truth),
         check_7_tv(args.out, ground_truth),
+        check_8_hdr(args.out, ground_truth),
     ]
 
     log("\n" + "=" * 78)
