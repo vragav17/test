@@ -23,6 +23,11 @@ PROXY_HEIGHT = 480
 PROXY_VIDEO_BITRATE = "1M"
 PROXY_AUDIO_BITRATE = "128k"
 
+# Bumped whenever the proxy is built differently, so caches from an older
+# pipeline are rebuilt rather than silently reused. v2 added HDR tone-mapping
+# and multi-track audio merging; a proxy from v1 has neither.
+PROXY_PIPELINE_VERSION = 2
+
 # Audio fingerprint sample rate (stage 3).
 AUDIO_SR = 22050
 
@@ -92,6 +97,7 @@ class Stage:
 # --------------------------------------------------------------------------
 
 _TOOLS = None
+_FILTERS = None
 
 
 def check_tools():
@@ -348,6 +354,57 @@ def compare_technical(a, b):
     return diffs
 
 
+def has_filter(name):
+    """Whether this ffmpeg build carries a given filter (zscale needs libzimg)."""
+    global _FILTERS
+    if _FILTERS is None:
+        out = subprocess.run(["ffmpeg", "-hide_banner", "-filters"],
+                             capture_output=True, text=True).stdout
+        _FILTERS = {line.split()[1] for line in out.splitlines()
+                    if len(line.split()) > 2 and line.strip()[:1] in ".TSC"}
+    return name in _FILTERS
+
+
+def video_filter_chain(src):
+    """The proxy's video filter: tone-map HDR to BT.709 before scaling.
+
+    Without this an HDR master is scaled but not converted -- PQ-encoded pixels
+    land in an 8-bit BT.709 proxy unchanged, which renders washed out and
+    low-contrast. Compared against a properly graded SDR master of the same
+    title, the luminance structure no longer matches and every shot drifts into
+    the weak-match band, so the diff reports `replace` regions that are not
+    real. Measured on a gradient: 12/64 untonemapped, which is enough to do it.
+
+    Tone-mapping both sides into the same space means the picture hash compares
+    like with like. The fact that the two deliveries differ in dynamic range is
+    still reported -- by the technical comparison, where it belongs, rather
+    than as a wall of false regions on the timeline.
+    """
+    scale = f"scale=-2:{PROXY_HEIGHT}"
+    try:
+        props = probe_technical(src)
+    except ToolError:
+        return scale  # unreadable tagging: treat as SDR rather than fail
+
+    if props.get("color_transfer") not in HDR_TRANSFERS:
+        return scale
+
+    if not has_filter("zscale"):
+        log("  WARNING: this is HDR content but ffmpeg has no zscale filter "
+            "(needs libzimg), so it cannot be tone-mapped. The proxy will look "
+            "washed out and may produce false `replace` regions against an SDR "
+            "version. Install an ffmpeg built with --enable-libzimg.")
+        return scale
+
+    log(f"  [stage 0] tone-mapping {props['dynamic_range']} to BT.709")
+    return (
+        "zscale=t=linear:npl=100,format=gbrpf32le,"
+        "zscale=p=bt709,tonemap=tonemap=hable:desat=0,"
+        "zscale=t=bt709:m=bt709:r=tv,format=yuv420p,"
+        + scale
+    )
+
+
 def count_audio_streams(path):
     """How many separate audio tracks the file carries."""
     out = run(
@@ -447,7 +504,8 @@ def build_proxy(src, force=False):
         try:
             with open(meta_path) as fh:
                 meta = json.load(fh)
-            if meta.get("source_signature") == sig:
+            if (meta.get("source_signature") == sig
+                    and meta.get("pipeline") == PROXY_PIPELINE_VERSION):
                 log(f"  [stage 0] proxy cache hit -> {os.path.relpath(proxy)}")
                 return proxy
         except (OSError, ValueError):
@@ -461,7 +519,7 @@ def build_proxy(src, force=False):
         cmd = (
             ["ffmpeg", "-nostdin", "-v", "error", "-y"]
             + tools["hwaccel"]
-            + ["-i", src, "-vf", f"scale=-2:{PROXY_HEIGHT}"]
+            + ["-i", src, "-vf", video_filter_chain(src)]
             + filter_args
             + ["-map", "0:v:0"] + map_args
             + tools["video_encoder"]
@@ -472,7 +530,9 @@ def build_proxy(src, force=False):
         run(cmd)
         os.replace(tmp, proxy)
         with open(meta_path, "w") as fh:
-            json.dump({"source": os.path.abspath(src), "source_signature": sig}, fh)
+            json.dump({"source": os.path.abspath(src),
+                       "source_signature": sig,
+                       "pipeline": PROXY_PIPELINE_VERSION}, fh)
 
     return proxy
 

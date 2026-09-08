@@ -150,7 +150,7 @@ out a web server and a job queue. The core CLIs still work with nothing from
 
 ## Verifying
 
-`verify.py` runs the seven acceptance criteria end to end through the real CLIs
+`verify.py` runs the eight acceptance criteria end to end through the real CLIs
 and prints the result of each, checking against `fixtures/ground_truth.json`:
 
 ```sh
@@ -256,7 +256,7 @@ built anyway.
 | `report.py` | stage 7 — HTML |
 | `make_variants.py` | fixture generator + `ground_truth.json` |
 | `make_synthetic_source.py` | synthetic source video, for testing without a download |
-| `verify.py` | the seven acceptance checks |
+| `verify.py` | the eight acceptance checks |
 | `run_demo.sh` | one command: fixtures -> fingerprints -> diffs -> reports -> checks |
 | `make_replace.py` | build a `replace` variant from any single video, standalone |
 | `app.py` | local web UI — FastAPI routes, SSE, static serving |
@@ -297,6 +297,7 @@ the reports and checks them against ground truth:
 | `v_audiodub` | one window's audio replaced with a 1 kHz tone, picture stream-copied | one `audio_changed`, no visual regions |
 | `v_replace` | two shots altered in place, runtime and cuts unchanged | one `replace` |
 | `v_reorder` | two adjacent shots swapped | an `insert` plus a `delete` of the same shot |
+| `v_hdr` | HDR10 (PQ/BT.2020/10-bit) re-grade of `v_base` | zero regions, dynamic range reported technically |
 | `v_tv` | broadcast-style delivery: scene removed **and** audio replaced **and** a scene shortened **and** downscaled to 576p | each change located independently |
 
 Exact timecodes are printed and written to `ground_truth.json`.
@@ -384,8 +385,16 @@ identical — a real property of the system, not a bug.
 A supplier delivering the same title as HDR10 and SDR is a real version pair,
 but it is **not an edit difference** — and the shot alignment correctly says so.
 
-Measured on a real PQ/BT.2020 10-bit master and its Hable-tonemapped BT.709
-SDR counterpart: **max phash distance 6/64, mean 3.4, zero regions**. That is
+**HDR is tone-mapped to BT.709 when the proxy is built.** Without that, PQ
+pixels land in an 8-bit BT.709 proxy unconverted: the HDR side renders washed
+out, its luminance structure stops matching a properly graded SDR master, and
+every shot drifts into the weak-match band. Measured on gradient content:
+**12/64 untonemapped, 6/64 after tone-mapping** — the difference between a wall
+of false `replace` regions and a clean result. `v_hdr` and acceptance check 8
+lock that in.
+
+Once both sides are in the same space, the picture compares like with like:
+**max phash distance 6/64, zero regions**. That is
 the right answer to "did the cut change?" (it did not) and a useless answer to
 "are these the same delivery?" (they are not).
 

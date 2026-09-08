@@ -53,5 +53,11 @@ Pushing UI changes also means `npm --prefix frontend run build` — `app.py` ser
   the first one, so every audio track must be merged explicitly or the rest of
   the soundtrack vanishes from both playback and the fingerprint. Measured: a
   change confined to track 2 scored 0/64 before the fix, 26/64 after.
+- HDR must be **tone-mapped in the proxy**. Untonemapped, PQ pixels go into an
+  8-bit BT.709 proxy unchanged and an HDR/SDR pair measures 12/64 -- inside the
+  weak band, so every shot fakes a `replace`. Tone-mapped it is 6/64. Needs
+  ffmpeg with libzimg for `zscale`.
+- `PROXY_PIPELINE_VERSION` in vdiff_common invalidates cached proxies when the
+  proxy is built differently. Bump it, or stale caches silently survive a fix.
 - The technical probe reads the **source**, never the 480p proxy — the proxy is
   8-bit BT.709 and would report every HDR master as SDR.
