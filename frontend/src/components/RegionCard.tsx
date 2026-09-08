@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { TYPE_COLOR, TYPE_LABEL, fmtTc } from '../format';
-import { AudioPair } from './AudioPair';
+import { AudioButton } from './AudioButton';
 import type { Region, RegionThumbs } from '../types';
 
 interface Props {
@@ -71,6 +71,11 @@ export function RegionCard({
             const end = side === 'a' ? region.a_end : region.b_end;
             const images = (side === 'a' ? thumbs?.thumbnails_a : thumbs?.thumbnails_b) ?? [];
             const description = side === 'a' ? region.description_a : region.description_b;
+            const hasContent = end - start > 0.05;
+            const inline = side === 'a' ? thumbs?.audio_a : thumbs?.audio_b;
+            const audioSrc = inline
+              ? `data:audio/mpeg;base64,${inline}`
+              : (jobId ? `/api/jobs/${jobId}/audio/${index}/${side}` : null);
             return (
               <div className="side" key={side}>
                 <div className="side-title">{name}</div>
@@ -95,6 +100,9 @@ export function RegionCard({
                     />
                   ))}
                 </div>
+                {hasContent && (
+                  <AudioButton side={side} src={audioSrc} />
+                )}
                 {description && (
                   <div className="muted" style={{ fontSize: '12.5px', marginTop: 9 }}>
                     {description}
@@ -104,14 +112,6 @@ export function RegionCard({
             );
           })}
         </div>
-        <AudioPair
-          jobId={jobId}
-          regionIndex={index}
-          hasA={region.a_end - region.a_start > 0.05}
-          hasB={region.b_end - region.b_start > 0.05}
-          inlineA={thumbs?.audio_a}
-          inlineB={thumbs?.audio_b}
-        />
       </div>
     </div>
   );

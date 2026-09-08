@@ -348,6 +348,43 @@ def compare_technical(a, b):
     return diffs
 
 
+def count_audio_streams(path):
+    """How many separate audio tracks the file carries."""
+    out = run(
+        ["ffprobe", "-v", "error", "-select_streams", "a",
+         "-show_entries", "stream=index", "-of", "csv=p=0", path],
+        capture_stdout=True,
+    )
+    return len([line for line in out.decode().splitlines() if line.strip()])
+
+
+def audio_merge_args(path):
+    """ffmpeg args that fold every audio track into one stereo stream.
+
+    Broadcast containers -- MXF especially -- ship discrete mono tracks rather
+    than a ready-made stereo mix: track 1 dialogue, track 2 music, 3 and 4 the
+    M&E stems, and so on. ffmpeg's default stream selection takes exactly ONE
+    of them, so without this the tool hears only the first track: the rest of
+    the soundtrack is silently dropped from both the playable clip and the
+    audio fingerprint, meaning a change confined to another stem is invisible.
+
+    Merging every track is deliberate. This is a monitoring signal, not a
+    deliverable master, and double-counting content that appears on two stems
+    is a far smaller error than missing a change entirely.
+
+    Returns (filter_args, map_args). Single-track files get plain mapping.
+    """
+    count = count_audio_streams(path)
+    if count <= 1:
+        return [], (["-map", "0:a?"] if count else [])
+    inputs = "".join(f"[0:a:{i}]" for i in range(count))
+    graph = (
+        f"{inputs}amerge=inputs={count},"
+        f"aformat=channel_layouts=stereo[vdiff_aout]"
+    )
+    return ["-filter_complex", graph], ["-map", "[vdiff_aout]"]
+
+
 def has_audio_stream(path):
     out = run(
         [
@@ -418,12 +455,19 @@ def build_proxy(src, force=False):
 
     with Stage("stage 0", f"proxy {os.path.basename(src)} -> {PROXY_HEIGHT}p"):
         tmp = proxy + ".partial.mp4"
+        # Fold every audio track into one stereo stream. Without this, ffmpeg
+        # maps a single track and the rest of a broadcast soundtrack is lost.
+        filter_args, map_args = audio_merge_args(src)
         cmd = (
             ["ffmpeg", "-nostdin", "-v", "error", "-y"]
             + tools["hwaccel"]
             + ["-i", src, "-vf", f"scale=-2:{PROXY_HEIGHT}"]
+            + filter_args
+            + ["-map", "0:v:0"] + map_args
             + tools["video_encoder"]
-            + ["-c:a", "aac", "-b:a", PROXY_AUDIO_BITRATE, tmp]
+            + ["-c:a", "aac", "-b:a", PROXY_AUDIO_BITRATE,
+               "-dn", "-sn",  # MXF carries data/timecode tracks mp4 cannot hold
+               tmp]
         )
         run(cmd)
         os.replace(tmp, proxy)
@@ -503,8 +547,15 @@ def extract_frames(proxy, times, duration=None, workers=None):
 # --------------------------------------------------------------------------
 
 
-def extract_audio_clip(proxy, start, end, bitrate="96k", max_seconds=30.0):
-    """Cut [start, end) of the proxy's audio to a small MP3 clip; return its path.
+def extract_audio_clip(proxy, start, end, bitrate="128k", max_seconds=30.0,
+                       source=None):
+    """Cut [start, end) to a small MP3 clip for listening; return its path.
+
+    Cut from `source` when it is available, falling back to the proxy. The
+    proxy's audio is already AAC 128k, so cutting from it would put the clip
+    through a second lossy generation -- audibly muffled on speech, which is
+    exactly what it sounds like when a broadcast master goes
+    PCM -> AAC -> MP3. Straight from the source it is one generation.
 
     An `audio_changed` region shows the *same* picture on both sides -- the
     thumbnails are identical by definition. Hearing the two clips is the only
@@ -523,10 +574,12 @@ def extract_audio_clip(proxy, start, end, bitrate="96k", max_seconds=30.0):
     duration = min(max(end - start, 0.0), max_seconds)
     if duration <= 0.05:
         return None
-    if not has_audio_stream(proxy):
+
+    origin = source if (source and os.path.isfile(source)) else proxy
+    if not has_audio_stream(origin):
         return None
 
-    sig = file_signature(proxy)
+    sig = file_signature(origin)
     folder = ensure_cache("clips", sig)
     path = os.path.join(
         folder, f"{int(start * 1000):09d}_{int(duration * 1000):09d}.mp3"
@@ -535,11 +588,14 @@ def extract_audio_clip(proxy, start, end, bitrate="96k", max_seconds=30.0):
         return path
 
     tmp = path + f".{os.getpid()}.partial.mp3"
+    # Same merge as the proxy, so what you hear matches what was fingerprinted.
+    filter_args, map_args = audio_merge_args(origin)
     try:
         run([
             "ffmpeg", "-nostdin", "-v", "error", "-y",
-            "-ss", f"{start:.3f}", "-t", f"{duration:.3f}", "-i", proxy,
-            "-vn", "-c:a", "libmp3lame", "-b:a", bitrate, tmp,
+            "-ss", f"{start:.3f}", "-t", f"{duration:.3f}", "-i", origin,
+        ] + filter_args + map_args + [
+            "-vn", "-dn", "-sn", "-c:a", "libmp3lame", "-b:a", bitrate, tmp,
         ])
     except ToolError as exc:
         log(f"    WARNING: could not cut audio at {start:.2f}s: {exc}")

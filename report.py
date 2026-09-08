@@ -160,26 +160,68 @@ h1 { font-size: 22px; margin: 0 0 4px; font-weight: 600; letter-spacing: -0.01em
 }
 .tech-note { color: var(--muted); font-size: 12.5px; margin-top: 14px; }
 .desc-pair { font-size: 12.5px; color: var(--muted); margin-top: 9px; }
-.audio-pair { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
-.audio-label {
-  font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
-  color: var(--muted); margin-bottom: 9px;
+.audio-btn-row { display: flex; align-items: center; gap: 10px; margin-top: 11px; }
+.audio-btn {
+  width: 30px; height: 30px; flex: none; border-radius: 50%;
+  border: 1px solid var(--line); background: #262b33; color: var(--text);
+  display: grid; place-items: center; cursor: pointer; padding: 0;
 }
-.audio-rows { display: flex; flex-direction: column; gap: 8px; }
-.audio-row { display: flex; align-items: center; gap: 10px; }
-.audio-tag {
-  width: 20px; height: 20px; flex: none; display: grid; place-items: center;
-  border-radius: 5px; background: #333944; font-size: 11px; font-weight: 700;
-}
-.audio-tag.a { color: #5b8def; }
-.audio-tag.b { color: #8e6fd8; }
-.audio-row audio { height: 34px; flex: 1; max-width: 460px; }
+.audio-btn:hover { background: #313742; }
+.audio-btn .ico-pause { display: none; }
+.audio-btn.playing .ico-play { display: none; }
+.audio-btn.playing .ico-pause { display: block; }
+.audio-btn-row.a .audio-btn.playing { border-color: #5b8def; color: #5b8def; }
+.audio-btn-row.b .audio-btn.playing { border-color: #8e6fd8; color: #8e6fd8; }
+.audio-meter { flex: 1; min-width: 0; max-width: 230px; }
+.audio-progress { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.audio-progress span { display: block; height: 100%; width: 0; background: var(--muted); }
+.audio-btn-row.a .audio-progress span { background: #5b8def; }
+.audio-btn-row.b .audio-progress span { background: #8e6fd8; }
+.audio-time { font-size: 11px; color: var(--muted); margin-top: 4px;
+              font-variant-numeric: tabular-nums; }
+.audio-btn-row audio { display: none; }
 """
 
 JS = """
 function toggle(id) {
   var card = document.getElementById(id);
   if (card) card.classList.toggle('open');
+}
+var nowPlaying = null;
+function fmtT(s) {
+  if (!isFinite(s)) return '--:--';
+  var m = Math.floor(s / 60), r = Math.floor(s % 60);
+  return m + ':' + String(r).padStart(2, '0');
+}
+// Only one clip plays at a time: you are A/B-ing the same moment, so starting
+// one side should stop the other rather than talk over it.
+function toggleAudio(btn) {
+  var row = btn.parentNode;
+  var el = row.querySelector('audio');
+  var bar = row.querySelector('.audio-progress span');
+  var label = row.querySelector('.audio-time');
+  if (!el.dataset.wired) {
+    el.dataset.wired = '1';
+    el.addEventListener('timeupdate', function () {
+      bar.style.width = (el.duration ? (el.currentTime / el.duration) * 100 : 0) + '%';
+      label.textContent = fmtT(el.currentTime) + ' / ' + fmtT(el.duration);
+    });
+    el.addEventListener('loadedmetadata', function () {
+      label.textContent = '0:00 / ' + fmtT(el.duration);
+    });
+    el.addEventListener('play', function () { btn.classList.add('playing'); });
+    el.addEventListener('pause', function () { btn.classList.remove('playing'); });
+    el.addEventListener('ended', function () {
+      btn.classList.remove('playing'); bar.style.width = '0%';
+    });
+    el.addEventListener('error', function () {
+      label.textContent = 'unavailable'; btn.disabled = true;
+    });
+  }
+  if (!el.paused) { el.pause(); return; }
+  if (nowPlaying && nowPlaying !== el) nowPlaying.pause();
+  nowPlaying = el;
+  el.play();
 }
 function openRegion(idx) {
   var card = document.getElementById('r' + idx);
@@ -408,29 +450,34 @@ def render_card(idx, region, thumbs):
             )
         else:
             shots = '<div class="none">No frames on this side.</div>'
+        clip = thumbs.get(f"audio_{side}")
+        if clip and end - start > 0.05:
+            audio_html = (
+                f'<div class="audio-btn-row {side}">'
+                f'<button type="button" class="audio-btn" onclick="toggleAudio(this)" '
+                f'aria-label="Play version {side.upper()}">'
+                f'<svg class="ico-play" width="11" height="12" viewBox="0 0 11 12">'
+                f'<path d="M1 0.8 L10 6 L1 11.2 Z" fill="currentColor"/></svg>'
+                f'<svg class="ico-pause" width="11" height="12" viewBox="0 0 11 12">'
+                f'<rect x="0" y="0" width="3.5" height="12" rx="1" fill="currentColor"/>'
+                f'<rect x="7" y="0" width="3.5" height="12" rx="1" fill="currentColor"/>'
+                f'</svg></button>'
+                f'<div class="audio-meter"><div class="audio-progress"><span></span></div>'
+                f'<div class="audio-time">0:00 / --:--</div></div>'
+                f'<audio preload="none" src="data:audio/mpeg;base64,{clip}"></audio></div>'
+            )
+        else:
+            audio_html = ""
+
         desc = region.get(f"description_{side}")
         desc_html = f'<div class="desc-pair">{esc(desc)}</div>' if desc else ""
         sides.append(
             f'<div class="side"><div class="side-title">{esc(name)}</div>'
-            f'{time_html}<div class="shots">{shots}</div>{desc_html}</div>'
+            f'{time_html}<div class="shots">{shots}</div>{audio_html}{desc_html}</div>'
         )
 
     # Open by default: the thumbnails are the report's substance when there are
     # no descriptions, so they should be on screen without a click.
-    audio = []
-    for side, tag in (("a", "A"), ("b", "B")):
-        clip = thumbs.get(f"audio_{side}")
-        if clip:
-            audio.append(
-                f'<div class="audio-row"><span class="audio-tag {side}">{tag}</span>'
-                f'<audio controls preload="none" '
-                f'src="data:audio/mpeg;base64,{clip}"></audio></div>'
-            )
-    audio_html = (
-        f'<div class="audio-pair"><div class="audio-label">Listen</div>'
-        f'<div class="audio-rows">{"".join(audio)}</div></div>'
-    ) if audio else ""
-
     return f"""
     <div class="card open" id="r{idx}" style="border-left-color:{colour}">
       <div class="card-head" onclick="toggle('r{idx}')">
@@ -447,7 +494,6 @@ def render_card(idx, region, thumbs):
         <div class="blurb">{esc(TYPE_BLURBS.get(kind, ''))}</div>
         {exp_html}
         <div class="sides">{''.join(sides)}</div>
-        {audio_html}
       </div>
     </div>"""
 

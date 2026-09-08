@@ -221,11 +221,15 @@ def region_audio(job_id: str, region_index: int, side: str):
     if end - start <= 0.05:
         raise HTTPException(status_code=404, detail="This side has no content to play")
 
-    proxy = (report.get(f"version_{side}") or {}).get("proxy")
+    version = report.get(f"version_{side}") or {}
+    proxy = version.get("proxy")
     if not proxy or not os.path.isfile(proxy):
         raise HTTPException(status_code=404, detail="Proxy for that version is gone")
 
-    clip = extract_audio_clip(proxy, start, end)
+    # Cut from the original when it is still on disk: one lossy generation
+    # instead of two, and every audio track rather than whichever one ffmpeg
+    # would pick by default.
+    clip = extract_audio_clip(proxy, start, end, source=version.get("source_path"))
     if not clip:
         raise HTTPException(status_code=404, detail="That version has no audio track")
     return FileResponse(clip, media_type="audio/mpeg")
