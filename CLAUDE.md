@@ -49,5 +49,9 @@ Pushing UI changes also means `npm --prefix frontend run build` — `app.py` ser
   fixture needs to register as `replace`.
 - Audio clips are MP3, not AAC. Open-source Chromium builds ship without AAC
   and fail with `DEMUXER_ERROR_NO_SUPPORTED_STREAMS`.
+- Broadcast MXF ships **discrete mono audio tracks**. `ffmpeg -i src` maps only
+  the first one, so every audio track must be merged explicitly or the rest of
+  the soundtrack vanishes from both playback and the fingerprint. Measured: a
+  change confined to track 2 scored 0/64 before the fix, 26/64 after.
 - The technical probe reads the **source**, never the 480p proxy — the proxy is
   8-bit BT.709 and would report every HDR master as SDR.

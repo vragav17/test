@@ -118,11 +118,13 @@ def build_thumbnails(regions, a_fp, b_fp, a_proxy, b_proxy):
     for idx, region in enumerate(regions):
         if region.type != "audio_changed":
             continue
-        for side, proxy in (("a", a_proxy), ("b", b_proxy)):
+        for side, proxy, fp in (("a", a_proxy, a_fp), ("b", b_proxy, b_fp)):
             start = region.a_start if side == "a" else region.b_start
             end = region.a_end if side == "a" else region.b_end
             if end - start > 0.05:
-                thumbs[idx][f"audio_{side}"] = audio_clip_b64(proxy, start, end)
+                thumbs[idx][f"audio_{side}"] = audio_clip_b64(
+                    proxy, start, end, source=fp.get("source_path")
+                )
     return thumbs
 
 
@@ -219,6 +221,7 @@ def run_diff(fp_a_path, fp_b_path, out_path, explain=False,
             "duration_seconds": a_fp["duration_seconds"],
             "shot_count": a_fp["shot_count"],
             "technical": a_fp.get("technical"),
+            "source_path": a_fp.get("source_path"),
         },
         "version_b": {
             "source": b_fp["source"],
@@ -226,6 +229,7 @@ def run_diff(fp_a_path, fp_b_path, out_path, explain=False,
             "duration_seconds": b_fp["duration_seconds"],
             "shot_count": b_fp["shot_count"],
             "technical": b_fp.get("technical"),
+            "source_path": b_fp.get("source_path"),
         },
         "alignment_score": score,
         "audio_change_threshold": audio_threshold,

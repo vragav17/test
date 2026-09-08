@@ -112,6 +112,24 @@ the app clips are cut on demand and cached; in the standalone report they are
 inlined as base64 for `audio_changed` regions, so an emailed report plays with
 no server.
 
+**Multi-track audio is merged, not sampled.** Broadcast containers — MXF
+especially — ship discrete mono tracks rather than a stereo mix: track 1
+dialogue, track 2 music, 3 and 4 the M&E stems. `ffmpeg -i src` maps exactly
+*one* of them by default, so without explicit handling the tool hears only
+track 1 and the rest of the soundtrack is silently dropped — from the playable
+clip *and* from the audio fingerprint.
+
+Measured on two MXFs with identical picture, identical track 1 and a different
+track 2: **0/64 before, 26/64 after**. The change was completely invisible;
+now it is detected. Every audio track is merged into one stereo stream for
+both fingerprinting and playback. Double-counting content that appears on two
+stems is a far smaller error than missing a change entirely.
+
+Clips are cut from the source file when it is still on disk rather than from
+the proxy, which avoids a second lossy generation. Measured at 0.4 dB of
+recovered high end — real but marginal, so it is a correctness tidy-up rather
+than the fix for anything audible.
+
 Clips are MP3, not AAC. AAC is the better codec but it is patent-encumbered,
 and open-source Chromium builds ship without it — an `<audio>` element fed AAC
 there fails with `DEMUXER_ERROR_NO_SUPPORTED_STREAMS`, which is exactly what
