@@ -1,0 +1,971 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vidiff — what changed between two cuts?</title>
+<style>
+:root{
+  --bg:#14161a;
+  --panel:#1c1f25;
+  --panel-2:#23262e;
+  --line:#2e323c;
+  --ink:#e8eaed;
+  --muted:#9aa1ad;
+  --dim:#6f7784;
+  --accent:#5b9dd9;
+  --del:#e5484d;
+  --ins:#46a758;
+  --rep:#f5a524;
+  --aud:#8e6fd8;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--bg);color:var(--ink);
+  font-family:var(--sans);
+  -webkit-font-smoothing:antialiased;
+  overflow:hidden;
+}
+
+/* ---------- deck frame ---------- */
+#deck{position:fixed;inset:0;display:grid;place-items:center;padding:28px 28px 56px}
+.slide{
+  display:none;
+  width:min(1180px,100%);
+  max-height:100%;
+  overflow-y:auto;
+  scrollbar-width:thin;
+  scrollbar-color:var(--line) transparent;
+}
+.slide.on{display:block;animation:in .28s ease both}
+@keyframes in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+/* ---------- chrome ---------- */
+#bar{position:fixed;left:0;top:0;height:2px;background:var(--accent);width:0;
+     transition:width .28s ease;z-index:10}
+#hud{position:fixed;bottom:0;left:0;right:0;height:48px;display:flex;align-items:center;
+     justify-content:space-between;padding:0 22px;font-size:12px;color:var(--dim);
+     border-top:1px solid var(--line);background:rgba(20,22,26,.92);
+     backdrop-filter:blur(6px);z-index:9}
+#hud .name{font-weight:600;color:var(--muted);letter-spacing:.14em;text-transform:uppercase;font-size:10.5px}
+#hud .mid{color:var(--dim)}
+#hud kbd{font-family:var(--mono);background:var(--panel-2);border:1px solid var(--line);
+         border-radius:4px;padding:1px 5px;font-size:10.5px;color:var(--muted)}
+#hud .nav{display:flex;gap:6px;align-items:center}
+#hud button{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);
+            border-radius:6px;width:26px;height:24px;cursor:pointer;font-size:13px;line-height:1}
+#hud button:hover{border-color:var(--accent);color:var(--ink)}
+#count{font-family:var(--mono);font-size:11px;color:var(--muted);min-width:46px;text-align:right}
+
+/* ---------- type ---------- */
+.eyebrow{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);
+         font-weight:600;margin:0 0 14px}
+h1{font-size:clamp(34px,5.2vw,62px);line-height:1.04;margin:0 0 18px;letter-spacing:-.025em;font-weight:680}
+h2{font-size:clamp(25px,3.3vw,38px);line-height:1.14;margin:0 0 20px;letter-spacing:-.02em;font-weight:660}
+h3{font-size:15px;margin:0 0 8px;font-weight:650;letter-spacing:-.005em}
+p{line-height:1.6;color:var(--muted);margin:0 0 14px;font-size:16px;max-width:76ch}
+.lead{font-size:19px;color:var(--ink);line-height:1.55}
+.sub{color:var(--dim);font-size:14.5px}
+strong{color:var(--ink);font-weight:620}
+code,.mono{font-family:var(--mono);font-size:.9em}
+code{background:var(--panel-2);border:1px solid var(--line);border-radius:4px;
+     padding:1px 5px;color:#d6b98c}
+a{color:var(--accent)}
+
+ul{margin:0 0 14px;padding-left:20px;color:var(--muted);line-height:1.62;font-size:15.5px}
+li{margin-bottom:8px}
+li::marker{color:var(--dim)}
+
+/* ---------- layout helpers ---------- */
+.cols{display:grid;gap:20px}
+.c2{grid-template-columns:1fr 1fr}
+.c3{grid-template-columns:repeat(3,1fr)}
+.c4{grid-template-columns:repeat(4,1fr)}
+.c21{grid-template-columns:1.25fr 1fr}
+.c12{grid-template-columns:1fr 1.3fr}
+@media(max-width:860px){.cols{grid-template-columns:1fr!important}}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px}
+.card p:last-child,.card ul:last-child{margin-bottom:0}
+.card .num{font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:.1em;
+           display:block;margin-bottom:7px}
+.flat{background:var(--panel-2)}
+
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+.stat .big{font-family:var(--mono);font-size:30px;font-weight:600;letter-spacing:-.02em;display:block;margin-bottom:4px}
+.stat .cap{font-size:12.5px;color:var(--dim);line-height:1.45}
+
+.tag{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;
+     padding:2px 8px;border-radius:999px;border:1px solid;text-transform:uppercase}
+.t-del{color:var(--del);border-color:rgba(229,72,77,.45);background:rgba(229,72,77,.1)}
+.t-ins{color:var(--ins);border-color:rgba(70,167,88,.45);background:rgba(70,167,88,.1)}
+.t-rep{color:var(--rep);border-color:rgba(245,165,36,.45);background:rgba(245,165,36,.1)}
+.t-aud{color:var(--aud);border-color:rgba(142,111,216,.45);background:rgba(142,111,216,.1)}
+.t-eq{color:var(--dim);border-color:var(--line);background:var(--panel-2)}
+
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;
+   color:var(--dim);font-weight:600;padding:0 12px 9px 0;border-bottom:1px solid var(--line)}
+td{padding:9px 12px 9px 0;border-bottom:1px solid rgba(46,50,60,.5);color:var(--muted);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td.n{font-family:var(--mono);color:var(--ink);white-space:nowrap}
+.warn{color:var(--del)}
+.good{color:var(--ins)}
+
+pre{background:#101217;border:1px solid var(--line);border-radius:9px;padding:14px 16px;
+    overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.62;color:#c3cad4;margin:0 0 14px}
+pre .k{color:#c586c0}pre .s{color:#ce9178}pre .c{color:#6a7180;font-style:italic}
+pre .f{color:#7fb3e0}pre .n{color:#b5cea8}
+
+.note{border-left:2px solid var(--accent);padding:2px 0 2px 14px;color:var(--muted);
+      font-size:14.5px;line-height:1.6}
+.note.warnb{border-color:var(--rep)}
+
+/* ---------- pipeline diagram ---------- */
+.pipe{display:grid;grid-template-columns:auto 1fr;gap:12px 16px;align-items:center}
+.lane-label{font-family:var(--mono);font-size:10.5px;color:var(--dim);letter-spacing:.1em;
+            text-transform:uppercase;white-space:nowrap}
+.lane{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.step{background:var(--panel);border:1px solid var(--line);border-radius:7px;
+      padding:9px 12px;font-size:12.5px;color:var(--muted);white-space:nowrap}
+.step b{display:block;color:var(--ink);font-size:13px;font-weight:600;margin-bottom:2px}
+.step.hi{border-color:var(--accent);background:rgba(91,157,217,.08)}
+.step.hi b{color:var(--accent)}
+.step.off{opacity:.5;border-style:dashed}
+.arrow{color:var(--dim);font-size:14px}
+.merge-rule{grid-column:1/-1;height:1px;background:var(--line);margin:4px 0}
+
+/* ---------- timeline figure ---------- */
+.tl{display:grid;grid-template-columns:34px 1fr;gap:6px 10px;align-items:center;
+    font-family:var(--mono);font-size:11px}
+.tl .lbl{color:var(--dim);text-align:right}
+.tl .track{display:flex;gap:3px}
+.blk{height:30px;border-radius:4px;display:grid;place-items:center;font-size:10px;
+     color:rgba(255,255,255,.82);border:1px solid rgba(255,255,255,.07)}
+.b-eq{background:#343945}
+.b-del{background:rgba(229,72,77,.75)}
+.b-ins{background:rgba(70,167,88,.72)}
+.b-rep{background:rgba(245,165,36,.72);color:#1a1a1a}
+.b-aud{background:rgba(142,111,216,.72)}
+.b-gap{background:repeating-linear-gradient(45deg,#22252c,#22252c 4px,#191c22 4px,#191c22 8px)}
+
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--dim);margin-top:14px}
+.legend span{display:flex;align-items:center;gap:6px}
+.dot{width:9px;height:9px;border-radius:2px;display:inline-block}
+
+.title-rule{width:54px;height:3px;background:var(--accent);border-radius:2px;margin:0 0 26px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:14px;color:var(--muted)}
+.kv dt{font-family:var(--mono);font-size:11.5px;color:var(--dim);white-space:nowrap;padding-top:2px}
+.kv dd{margin:0}
+
+.tiny{font-size:12px;color:var(--dim);line-height:1.55}
+/* A grid of many small cards: tighter, so it clears a 1024x768 projector. */
+.dense{gap:14px}
+.dense .card{padding:13px 15px}
+.dense .num{margin-bottom:5px}
+.dense h3{font-size:14px;margin-bottom:6px}
+
+.mt{margin-top:18px}.mt-s{margin-top:10px}
+.center{text-align:center}
+</style>
+</head>
+<body>
+
+<div id="bar"></div>
+<div id="deck">
+
+<!-- 1 ───────────────────────────────────────────── title -->
+<section class="slide">
+  <p class="eyebrow">Local video analysis · proof of concept</p>
+  <h1>Vidiff</h1>
+  <div class="title-rule"></div>
+  <p class="lead" style="max-width:62ch">Two cuts of the same title go in.<br>
+     A timecoded, plain-English list of what changed comes out.</p>
+  <div class="cols c4 mt" style="margin-top:34px">
+    <div class="stat"><span class="big">100%</span><span class="cap">local — no cloud, no API keys, nothing leaves the machine</span></div>
+    <div class="stat"><span class="big">O(n·m)</span><span class="cap">Needleman-Wunsch global alignment, vectorised</span></div>
+    <div class="stat"><span class="big">64-bit</span><span class="cap">perceptual hash per shot, picture and audio</span></div>
+    <div class="stat"><span class="big">7&nbsp;/&nbsp;8</span><span class="cap">acceptance checks passing, 1 needs Ollama</span></div>
+  </div>
+</section>
+
+<!-- 2 ───────────────────────────────────────────── the problem -->
+<section class="slide">
+  <p class="eyebrow">The problem</p>
+  <h2>Two files. Same title. Nobody can say what's different.</h2>
+  <div class="cols c21">
+    <div>
+      <p>A title does not ship once. It ships as a theatrical cut, an airline cut, a
+         broadcast cut, a streaming master, a re-grade, a re-dub, a director's edition
+         — and then again when a note comes back from compliance.</p>
+      <p>When two of those files land on a desk, the questions are always the same:</p>
+      <ul>
+        <li><strong>Is this actually a new version, or a re-wrap of one we already have?</strong></li>
+        <li><strong>What was cut, and at what timecode?</strong></li>
+        <li><strong>Did anyone touch the audio without touching the picture?</strong></li>
+        <li><strong>Is the difference editorial, or just the delivery format?</strong></li>
+      </ul>
+      <p class="sub">The metadata that should answer this — filenames, sidecar XML, the
+         supplier's delivery note — is written by hand, and is wrong often enough that
+         nobody trusts it.</p>
+    </div>
+    <div class="card">
+      <span class="num">WHAT ARRIVES</span>
+      <div class="kv">
+        <dt>A</dt><dd><span class="mono">TITLE_MASTER_v3_FINAL.mxf</span><br>
+          <span class="tiny">2 h 08 m · 1080p · SDR · 6 audio tracks</span></dd>
+        <dt>B</dt><dd><span class="mono">TITLE_TV_DELIVERY.mxf</span><br>
+          <span class="tiny">2 h 04 m · 1080p · HDR10 · 6 audio tracks</span></dd>
+      </div>
+      <div class="note mt" style="font-size:13.5px">
+        Four minutes shorter. Different dynamic range. Is that one scene removed,
+        or twelve trims spread across the film? Is the HDR flag a real re-grade
+        or just a container difference?
+      </div>
+      <p class="tiny mt">Today this is answered by a human scrubbing both files side by
+         side. It takes hours, it is done under deadline, and it is the first thing
+         dropped when the deadline wins.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 3 ───────────────────────────────────────────── why it's hard -->
+<section class="slide">
+  <p class="eyebrow">Why the obvious answers don't work</p>
+  <h2>Every cheap shortcut fails on real deliveries.</h2>
+  <div class="cols c2">
+    <div class="card">
+      <span class="num">01 — FILE HASH</span>
+      <h3>Byte-compare the files</h3>
+      <p class="sub">Answers one question: are these literally the same bytes. Re-encode
+         the same edit at a different bitrate and the answer is "completely different",
+         which is true and useless.</p>
+    </div>
+    <div class="card">
+      <span class="num">02 — RUNTIME</span>
+      <h3>Compare durations</h3>
+      <p class="sub">Tells you four minutes went missing. Not where, not how many places,
+         and nothing at all when a scene is <em>replaced</em> by one of equal length.</p>
+    </div>
+    <div class="card">
+      <span class="num">03 — FRAME BY FRAME</span>
+      <h3>Compare frame <span class="mono">n</span> of A to frame <span class="mono">n</span> of B</h3>
+      <p class="sub">Works until the first cut. Remove ten seconds at minute four and
+         every frame after it is misaligned — one edit reports as a two-hour difference.</p>
+    </div>
+    <div class="card">
+      <span class="num">04 — SLIDING WINDOW</span>
+      <h3>Re-sync with a heuristic</h3>
+      <p class="sub">Handles one shift. Breaks on the second, and on any reorder. Fails
+         silently, in a way that looks like a clean result — the worst failure mode there is.</p>
+    </div>
+  </div>
+  <div class="note mt">
+    The real shape of the problem: <strong>two sequences of the same underlying content, with
+    insertions, deletions, substitutions and reorders between them.</strong> That is not a
+    video problem. It is a sequence alignment problem — and sequence alignment has an
+    exact, optimal, sixty-year-old answer.
+  </div>
+</section>
+
+<!-- 4 ───────────────────────────────────────────── the idea -->
+<section class="slide">
+  <p class="eyebrow">The approach</p>
+  <h2>Turn each film into a string. Then align the strings.</h2>
+  <div class="cols c12">
+    <div>
+      <p>Genome alignment compares two DNA sequences that share an ancestor and
+         have since diverged by insertion, deletion and mutation. Two cuts of a film
+         are the same structure with a different alphabet.</p>
+      <dl class="kv mt">
+        <dt>letter</dt><dd>one <strong>shot</strong> — the span between two cuts</dd>
+        <dt>alphabet</dt><dd>a <strong>64-bit perceptual hash</strong> of that shot's middle frame</dd>
+        <dt>similarity</dt><dd><strong>Hamming distance</strong> between two hashes</dd>
+        <dt>algorithm</dt><dd><strong>Needleman-Wunsch</strong> global alignment</dd>
+        <dt>output</dt><dd>runs of <span class="tag t-eq">equal</span> <span class="tag t-del">delete</span> <span class="tag t-ins">insert</span> <span class="tag t-rep">replace</span> <span class="tag t-aud">audio</span></dd>
+      </dl>
+      <p class="mt">A shot is the right unit. It is <strong>editorially meaningful</strong> — cuts are
+         where editors work — and there are a few thousand of them in a feature rather
+         than a few hundred thousand frames.</p>
+    </div>
+    <div class="card">
+      <span class="num">THE ALIGNMENT, DRAWN</span>
+      <div class="tl">
+        <div class="lbl">A</div>
+        <div class="track">
+          <div class="blk b-eq" style="flex:2">s1</div>
+          <div class="blk b-eq" style="flex:2">s2</div>
+          <div class="blk b-del" style="flex:3">s3 s4</div>
+          <div class="blk b-eq" style="flex:2">s5</div>
+          <div class="blk b-rep" style="flex:2">s6</div>
+          <div class="blk b-gap" style="flex:2"></div>
+          <div class="blk b-eq" style="flex:2">s7</div>
+        </div>
+        <div class="lbl">B</div>
+        <div class="track">
+          <div class="blk b-eq" style="flex:2">s1</div>
+          <div class="blk b-eq" style="flex:2">s2</div>
+          <div class="blk b-gap" style="flex:3"></div>
+          <div class="blk b-eq" style="flex:2">s3</div>
+          <div class="blk b-rep" style="flex:2">s4</div>
+          <div class="blk b-ins" style="flex:2">s5</div>
+          <div class="blk b-eq" style="flex:2">s6</div>
+        </div>
+      </div>
+      <div class="legend">
+        <span><i class="dot" style="background:#343945"></i>equal</span>
+        <span><i class="dot" style="background:var(--del)"></i>in A only — cut</span>
+        <span><i class="dot" style="background:var(--ins)"></i>in B only — added</span>
+        <span><i class="dot" style="background:var(--rep)"></i>same slot, different picture</span>
+      </div>
+      <p class="tiny mt">Gaps absorb the drift. Everything after an edit stays aligned,
+         which is precisely what the naive approaches cannot do.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 5 ───────────────────────────────────────────── pipeline -->
+<section class="slide">
+  <p class="eyebrow">The pipeline</p>
+  <h2>Eight stages, two parallel lanes, one merge.</h2>
+  <div class="pipe">
+    <div class="lane-label">Version A</div>
+    <div class="lane">
+      <div class="step"><b>Probe</b>codec · HDR · tracks</div><span class="arrow">→</span>
+      <div class="step"><b>Proxy 480p</b>tone-map · merge audio</div><span class="arrow">→</span>
+      <div class="step"><b>Shots</b>PySceneDetect</div><span class="arrow">→</span>
+      <div class="step"><b>Fingerprint</b>phash + audio hash</div>
+    </div>
+    <div class="lane-label">Version B</div>
+    <div class="lane">
+      <div class="step"><b>Probe</b>codec · HDR · tracks</div><span class="arrow">→</span>
+      <div class="step"><b>Proxy 480p</b>tone-map · merge audio</div><span class="arrow">→</span>
+      <div class="step"><b>Shots</b>PySceneDetect</div><span class="arrow">→</span>
+      <div class="step"><b>Fingerprint</b>phash + audio hash</div>
+    </div>
+    <div class="merge-rule"></div>
+    <div class="lane-label">Merge</div>
+    <div class="lane">
+      <div class="step hi"><b>Align</b>Needleman-Wunsch</div><span class="arrow">→</span>
+      <div class="step"><b>Regions</b>merge runs</div><span class="arrow">→</span>
+      <div class="step"><b>Thumbnails</b>both sides</div><span class="arrow">→</span>
+      <div class="step off"><b>Describe</b>local LLM · optional</div><span class="arrow">→</span>
+      <div class="step"><b>Report</b>HTML + JSON</div>
+    </div>
+  </div>
+  <div class="cols c3 mt" style="margin-top:26px">
+    <div class="card flat">
+      <h3>The proxy earns its keep</h3>
+      <p class="sub" style="font-size:13.5px">Everything downstream reads one normalised
+        480p H.264 file instead of a 200 GB master: same resolution, same colour space,
+        all audio tracks merged. Decode cost drops by orders of magnitude and the two
+        versions become comparable <em>by construction</em>.</p>
+    </div>
+    <div class="card flat">
+      <h3>Lanes are independent</h3>
+      <p class="sub" style="font-size:13.5px">A and B share nothing until alignment, so
+        they run on two workers at once — and a fingerprint computed once is cached and
+        reused the next time that file is compared against anything else.</p>
+    </div>
+    <div class="card flat">
+      <h3>The technical probe skips the proxy</h3>
+      <p class="sub" style="font-size:13.5px">It reads the <strong>source</strong>, deliberately.
+        The proxy is 8-bit BT.709 by definition, so probing it would report every HDR
+        master on earth as SDR.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 6 ───────────────────────────────────────────── fingerprint -->
+<section class="slide">
+  <p class="eyebrow">Stage 3–4 · the alphabet</p>
+  <h2>What a 64-bit perceptual hash does and doesn't see.</h2>
+  <div class="cols c2">
+    <div>
+      <p><code>imagehash.phash</code> takes the shot's middle frame, reduces it to greyscale
+         32×32, runs a DCT, keeps the low-frequency 8×8 corner and thresholds it at the
+         median. The result is 64 bits describing <strong>coarse luminance structure</strong>.</p>
+      <p>That makes it robust to exactly the things that should not count as an edit —
+         resolution, bitrate, re-encoding — which is the whole point. But robustness
+         cuts both ways, and the blind spots must be <em>measured</em>, not assumed.</p>
+      <div class="note warnb mt">
+        Every number in this table was measured in this codebase, not quoted from a paper.
+        Distance is out of 64 bits; <strong>≤10 is a match</strong>, 11–20 is a weak band,
+        &gt;20 is a mismatch.
+      </div>
+    </div>
+    <div class="card">
+      <span class="num">MEASURED PHASH DISTANCE</span>
+      <table>
+        <thead><tr><th>Transform applied to one shot</th><th>Distance</th><th></th></tr></thead>
+        <tbody>
+          <tr><td>Full negate</td><td class="n">62 / 64</td><td class="good">seen</td></tr>
+          <tr><td>Horizontal flip</td><td class="n">28 / 64</td><td class="good">seen</td></tr>
+          <tr><td>30&nbsp;% punch-in</td><td class="n">28 / 64</td><td class="good">seen</td></tr>
+          <tr><td>Entirely different footage</td><td class="n">28 / 64</td><td class="good">seen</td></tr>
+          <tr><td>15&nbsp;% punch-in</td><td class="n">14 / 64</td><td style="color:var(--rep)">weak</td></tr>
+          <tr><td>Lower-third graphic added</td><td class="n">14 / 64</td><td style="color:var(--rep)">weak</td></tr>
+          <tr><td>720p vs 360p, same edit</td><td class="n">0 / 64</td><td class="good">invariant ✓</td></tr>
+          <tr><td>Colour grade · hue · saturation</td><td class="n">0 / 64</td><td class="warn">invisible</td></tr>
+          <tr><td>Blur · greyscale conversion</td><td class="n">0 / 64</td><td class="warn">invisible</td></tr>
+        </tbody>
+      </table>
+      <p class="tiny mt">The last two rows are a real limitation, stated plainly: a pure
+         colour change is <strong>not detectable</strong> by this signal. Slide 14 says what
+         to do about it.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 7 ───────────────────────────────────────────── audio fingerprint -->
+<section class="slide">
+  <p class="eyebrow">Stage 4 · the second signal</p>
+  <h2>A re-dub changes nothing on screen.</h2>
+  <div class="cols c12">
+    <div>
+      <p>A localised dub, a replaced music cue, a censored line — the picture is
+         bit-identical and the picture hash says <span class="mono">0 / 64</span>. Without a
+         second signal these changes are invisible, and they are among the most common
+         version differences that exist.</p>
+      <p>So every shot also carries a <strong>64-bit audio hash</strong>: the audio under the shot
+         at 22 050 Hz mono, a mel-spectrogram of 64 bands pooled to 8×8, thresholded at
+         its median. Same width, same Hamming comparison, same units.</p>
+      <div class="note mt">
+        <strong>Audio never touches the alignment score.</strong> It is a separate pass over the
+        pairs the alignment already matched: where the picture matches but the audio
+        distance exceeds 16/64, the pair is retagged <span class="tag t-aud">audio_changed</span>.
+      </div>
+      <p class="mt sub">That separation is deliberate. Letting an audio term into the
+        scoring function would make the alignment's behaviour a matter of tuning two
+        weights against each other — and the alignment is the part that has to be
+        defensible.</p>
+    </div>
+    <div class="card">
+      <span class="num">WHY IT IS A SECOND PASS, NOT A SECOND TERM</span>
+      <pre><span class="c"># align.py — the scoring function sees picture only</span>
+<span class="k">def</span> <span class="f">score_matrix</span>(a_bits, b_bits):
+    d = hamming_matrix(a_bits, b_bits)
+    s = np.full(d.shape, MISMATCH_SCORE)
+    s[d &lt;= WEAK_MAX_DISTANCE]  = WEAK_SCORE   <span class="c"># 0</span>
+    s[d &lt;= MATCH_MAX_DISTANCE] = MATCH_SCORE  <span class="c"># +2</span>
+    <span class="k">return</span> s
+
+<span class="c"># ...and afterwards, over aligned pairs only:</span>
+<span class="k">if</span> op.type == <span class="s">"equal"</span> <span class="k">and</span> ahash_distance &gt; <span class="n">16</span>:
+    op.type = <span class="s">"audio_changed"</span></pre>
+      <p class="tiny">The picture decides the timeline. Audio annotates it. Each signal
+         is interpretable on its own, and a bad audio track can never corrupt the
+         structural result.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 8 ───────────────────────────────────────────── the algorithm -->
+<section class="slide">
+  <p class="eyebrow">Stage 5 · the judged component</p>
+  <h2>Needleman-Wunsch — a real algorithm, not a heuristic.</h2>
+  <div class="cols c2">
+    <div>
+      <p>Written directly against numpy. No bioinformatics library, no model, no
+         tuned rules. It returns the <strong>provably optimal</strong> alignment under its
+         scoring scheme — not a good-enough one.</p>
+      <pre>H[i][j] = max(
+    H[i-1][j-1] + score(a<span class="n">ᵢ</span>, b<span class="n">ⱼ</span>),   <span class="c"># pair them</span>
+    H[i-1][j]   + gap,            <span class="c"># a[i] deleted</span>
+    H[i][j-1]   + gap,            <span class="c"># b[j] inserted</span>
+)</pre>
+      <table class="mt">
+        <thead><tr><th>Condition</th><th>Score</th></tr></thead>
+        <tbody>
+          <tr><td>phash distance ≤ 10 — a match</td><td class="n good">+2</td></tr>
+          <tr><td>11–20 — weak, neither rewarded nor punished</td><td class="n">0</td></tr>
+          <tr><td>&gt; 20 — a mismatch</td><td class="n warn">−1</td></tr>
+          <tr><td>gap — an insertion or a deletion</td><td class="n warn">−1</td></tr>
+        </tbody>
+      </table>
+      <p class="tiny">The weak band matters: it lets two shots that are <em>probably</em> the
+        same sit together without the alignment paying to keep them, which is how
+        re-grades and overlays stop shredding the timeline.</p>
+    </div>
+    <div>
+      <div class="card">
+        <span class="num">THE ONE INTERESTING OPTIMISATION</span>
+        <p class="sub" style="font-size:14px">The left-neighbour term
+          <span class="mono">H[i][j] = max(…, H[i][j−1] + gap)</span> looks inherently
+          sequential — each cell depends on the one beside it. With a <strong>linear</strong>
+          gap penalty it is just a running maximum in disguise. Substituting</p>
+        <pre style="margin-top:10px">G[j] = H[i][j] − j·gap
+
+⇒  G[j] = max(best[j] − j·gap, G[j−1])
+⇒  np.maximum.accumulate(...)</pre>
+        <p class="sub" style="font-size:14px;margin-bottom:0">Each row becomes <strong>three vector
+          operations</strong> instead of an inner Python loop. A feature-length pair aligns in
+          seconds, on a laptop, in pure numpy.</p>
+      </div>
+      <div class="note mt">
+        <strong>Zero references to any model in <span class="mono">align.py</span>.</strong>
+        Verifiable with a single grep. The stage being judged is arithmetic, and it
+        produces the same answer every time it runs.
+      </div>
+      <p class="tiny mt">Traceback walks the pointer matrix from the bottom-right corner,
+        emitting one op per step. Consecutive ops of the same type are then grouped with
+        <span class="mono">itertools.groupby</span> into regions carrying real timecodes on
+        both sides, and <span class="mono">equal</span> runs are dropped.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 9 ───────────────────────────────────────────── output -->
+<section class="slide">
+  <p class="eyebrow">Stage 7 · the output</p>
+  <h2>Regions, with a timecode on both sides.</h2>
+  <p>Every region answers three questions at once: <strong>what kind of change</strong>,
+     <strong>where it sits in A</strong>, and <strong>where it sits in B</strong>. Both timecodes matter —
+     an editor working in B cannot use A's timeline, and an archivist checking A cannot
+     use B's.</p>
+  <table class="mt">
+    <thead><tr><th style="width:140px">Type</th><th>Means</th><th>Reads as</th></tr></thead>
+    <tbody>
+      <tr><td><span class="tag t-del">delete</span></td>
+          <td>a run of shots in A with no counterpart in B</td>
+          <td class="mono" style="color:var(--ink)">00:12:04 → 00:12:41 · 4 shots cut</td></tr>
+      <tr><td><span class="tag t-ins">insert</span></td>
+          <td>a run of shots in B with no counterpart in A</td>
+          <td class="mono" style="color:var(--ink)">00:31:18 → 00:31:52 · 3 shots added</td></tr>
+      <tr><td><span class="tag t-rep">replace</span></td>
+          <td>paired by position, but the picture disagrees</td>
+          <td class="mono" style="color:var(--ink)">01:02:55 → 01:03:10 · picture differs</td></tr>
+      <tr><td><span class="tag t-aud">audio_changed</span></td>
+          <td>picture identical, audio hash apart by &gt; 16/64</td>
+          <td class="mono" style="color:var(--ink)">00:45:02 → 00:45:29 · audio differs</td></tr>
+      <tr><td><span class="tag t-eq">technical</span></td>
+          <td>a container-level difference, outside the timeline entirely</td>
+          <td class="mono" style="color:var(--ink)">dynamic_range: SDR → HDR10</td></tr>
+    </tbody>
+  </table>
+  <div class="cols c2 mt" style="margin-top:24px">
+    <div class="card flat">
+      <h3>Two artefacts, on purpose</h3>
+      <p class="sub" style="font-size:13.5px"><span class="mono">report.json</span> is the machine
+        contract — stable field names, no embedded images, safe to diff or feed onward.
+        <span class="mono">report.html</span> is fully self-contained: thumbnails inlined, no
+        external requests, mailable as a single file. Thumbnails live in a
+        <span class="mono">.thumbs.json</span> sidecar so the JSON stays small.</p>
+    </div>
+    <div class="card flat">
+      <h3>Technical differences are kept apart</h3>
+      <p class="sub" style="font-size:13.5px">SDR→HDR, a codec change, a channel-layout
+        change: these are real and worth reporting, but they are <em>not</em> edits. Mixing
+        them into the timeline is how a tool loses a user's trust — a format re-wrap
+        that reports as forty-two replaced scenes is worse than no tool at all.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 10 ──────────────────────────────────────────── where the LLM sits -->
+<section class="slide">
+  <p class="eyebrow">Stage 6 · optional, and last</p>
+  <h2>The model writes the sentence. It never finds the change.</h2>
+  <div class="cols c2">
+    <div>
+      <p>The detection is finished — timecodes, types and boundaries all decided — before
+         a local model is asked anything. Its only job is turning
+         <span class="mono">delete · 00:12:04 → 00:12:41 · 4 shots</span> into
+         <em>"a four-shot exchange in the corridor is missing from the TV cut."</em></p>
+      <div class="note">
+        <strong>Stage 6 is off by default</strong>, and the build order required stages 0–5 and 7
+        to work with it disabled. Turn the model off and you lose prose. You lose no
+        finding, no timecode and no region.
+      </div>
+      <h3 class="mt">Why it is bounded this way</h3>
+      <ul>
+        <li><strong>Reproducible.</strong> The same two files give the same regions, run to run, machine to machine.</li>
+        <li><strong>Auditable.</strong> A disputed result traces to a Hamming distance and a scoring rule, not to a sampled token.</li>
+        <li><strong>Honest about failure.</strong> A hallucinated description is obviously wrong beside its own thumbnails; a hallucinated <em>timecode</em> would be undetectable.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <span class="num">THE CONTRACT WITH THE MODEL</span>
+      <div class="cols" style="grid-template-columns:1fr;gap:10px">
+        <div class="card flat" style="padding:13px 15px">
+          <h3 style="color:var(--ins)">✓ What it is asked</h3>
+          <p class="tiny" style="margin:0">"Here are thumbnails from one region of one
+            version, and its type and duration. Describe what is shown, in one sentence."</p>
+        </div>
+        <div class="card flat" style="padding:13px 15px">
+          <h3 style="color:var(--del)">✗ What it is never asked</h3>
+          <p class="tiny" style="margin:0">"Here are two sets of frames — tell us what
+            changed." Comparison is assembled in Python from values the pipeline already
+            computed. The model is never the judge of difference.</p>
+        </div>
+      </div>
+      <dl class="kv mt">
+        <dt>runtime</dt><dd>Ollama on <span class="mono">localhost:11434</span> — the one network call in the system</dd>
+        <dt>model</dt><dd><span class="mono">qwen3-vl:8b</span>, vision-capable, running on the laptop</dd>
+        <dt>limits</dt><dd>2 requests in flight, 180 s read timeout, temperature 0.2</dd>
+        <dt>failure</dt><dd>unreachable or slow → the region keeps its factual summary</dd>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<!-- 11 ──────────────────────────────────────────── the app -->
+<section class="slide">
+  <p class="eyebrow">The proof of concept</p>
+  <h2>Vidiff — the pipeline as a workflow application.</h2>
+  <div class="cols c3">
+    <div class="card">
+      <span class="num">PICK</span>
+      <h3>Two files, two clicks</h3>
+      <p class="sub" style="font-size:13.5px">A built-in file browser walks the local disk —
+        no upload, no copy, nothing leaves the machine. Optional labels, a shot-detection
+        threshold, an audio threshold, and a switch for the descriptions.</p>
+    </div>
+    <div class="card">
+      <span class="num">WATCH</span>
+      <h3>The graph runs in front of you</h3>
+      <p class="sub" style="font-size:13.5px">The two lanes light up in parallel and merge
+        at alignment. Server-sent events stream every stage transition and log line live,
+        with per-stage elapsed times. Jobs are cancellable at any stage boundary.</p>
+    </div>
+    <div class="card">
+      <span class="num">READ</span>
+      <h3>Grouped, thumbnailed, audible</h3>
+      <p class="sub" style="font-size:13.5px">Changes group by kind rather than arriving as
+        one flat list. Each region shows both sides' thumbnails side by side, and each
+        column carries its own play button for the audio underneath it.</p>
+    </div>
+  </div>
+  <div class="cols c21 mt" style="margin-top:24px">
+    <div class="card flat">
+      <h3>Hearing the difference, not just reading about it</h3>
+      <p class="sub" style="font-size:13.5px;margin-bottom:0">An <span class="tag t-aud">audio_changed</span>
+        region is a claim about sound, and the only real way to check it is to listen.
+        Both versions get a play button in their own column, side by side, and only one
+        plays at a time. Clips are cut <strong>on demand</strong> — most regions are never played,
+        and cutting every one up front would slow every comparison for a feature used on a
+        handful. They are cut from the <strong>original</strong> where it is still on disk: one lossy
+        generation instead of two, and every audio track rather than whichever one ffmpeg
+        would have picked.</p>
+    </div>
+    <div>
+      <dl class="kv">
+        <dt>backend</dt><dd>FastAPI + uvicorn, bound to <span class="mono">127.0.0.1</span> only</dd>
+        <dt>frontend</dt><dd>React 19 + Vite + TypeScript</dd>
+        <dt>progress</dt><dd>SSE stream, 200 ms poll, no queue to deadlock</dd>
+        <dt>parallel</dt><dd>2 workers — one per version lane</dd>
+        <dt>history</dt><dd>every job kept under <span class="mono">.cache/jobs/</span>, re-openable</dd>
+        <dt>fallback</dt><dd>a no-build HTML UI, so it runs before <span class="mono">npm install</span></dd>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<!-- 12 ──────────────────────────────────────────── what real files taught us -->
+<section class="slide">
+  <p class="eyebrow">What broke · and what the fix measured</p>
+  <h2>Three bugs that only real delivery formats could find.</h2>
+  <div class="cols c3">
+    <div class="card">
+      <span class="num">01 — BROADCAST MXF</span>
+      <h3>Five of six audio tracks silently vanished</h3>
+      <p class="sub" style="font-size:13.5px">Broadcast MXF carries <strong>discrete mono tracks</strong>
+        — dialogue, music, effects, each its own stream. <span class="mono">ffmpeg -i src</span>
+        maps only the first. The rest disappeared from playback <em>and</em> from the
+        fingerprint, so a change confined to track 2 was simply not there.</p>
+      <p class="tiny mt-s">Fix: <span class="mono">amerge</span> across every track before hashing.</p>
+      <div class="stat mt-s" style="padding:12px 14px">
+        <span class="big" style="font-size:22px">0 → 26<span style="font-size:14px;color:var(--dim)">/64</span></span>
+        <span class="cap">a music-only change, before and after</span>
+      </div>
+    </div>
+    <div class="card">
+      <span class="num">02 — HDR MASTERS</span>
+      <h3>Every shot faked a <span class="tag t-rep">replace</span></h3>
+      <p class="sub" style="font-size:13.5px">PQ-encoded pixels were going into an 8-bit
+        BT.709 proxy untouched. An HDR/SDR pair of the <em>same edit</em> measured 12/64 —
+        inside the weak band, out of the match band — so the alignment refused to call
+        anything equal.</p>
+      <p class="tiny mt-s">Fix: tone-map in the proxy —
+        <span class="mono">zscale → tonemap=hable → bt709</span>.</p>
+      <div class="stat mt-s" style="padding:12px 14px">
+        <span class="big" style="font-size:22px">12 → 6<span style="font-size:14px;color:var(--dim)">/64</span></span>
+        <span class="cap">same edit, HDR vs SDR — now zero regions</span>
+      </div>
+    </div>
+    <div class="card">
+      <span class="num">03 — CACHED PROXIES</span>
+      <h3>A fixed pipeline, still broken output</h3>
+      <p class="sub" style="font-size:13.5px">Both fixes above change how a proxy is
+        <em>built</em>. A cached proxy from before the fix is still a valid file, so it was
+        reused — and the bug survived its own fix, invisibly.</p>
+      <p class="tiny mt-s">Fix: <span class="mono">PROXY_PIPELINE_VERSION</span> is part of the
+        cache key. Bump it and every stale proxy is rebuilt.</p>
+      <div class="note mt-s" style="font-size:12.5px">The general lesson: a cache keyed on
+        inputs alone is wrong the moment the <em>transform</em> can change.</div>
+    </div>
+  </div>
+  <div class="note mt">
+    One more, worth stating because it cuts the other way: the leading theory for the
+    audio problem was double-lossy encoding. Measured, it cost <strong>0.4 dB</strong> — nothing.
+    It was not the cause, and saying so was more useful than claiming the credit.
+  </div>
+</section>
+
+<!-- 13 ──────────────────────────────────────────── verification -->
+<section class="slide">
+  <p class="eyebrow">Does it actually work?</p>
+  <h2>Eight acceptance checks against known ground truth.</h2>
+  <p>Synthetic variants are generated from one source with the edit points
+     <strong>recorded as they are made</strong>, into <span class="mono">fixtures/ground_truth.json</span>.
+     The pipeline then has to rediscover them within a timecode tolerance —
+     it is never shown the answer.</p>
+  <table class="mt">
+    <thead><tr><th style="width:36px">#</th><th>What it proves</th><th style="width:96px">Result</th></tr></thead>
+    <tbody>
+      <tr><td class="n">1</td><td>720p vs 360p of the same edit fingerprints identically — resolution invariance</td><td class="n good">pass</td></tr>
+      <tr><td class="n">2</td><td>A removed scene yields exactly one <span class="tag t-del">delete</span>, at the right timecode</td><td class="n good">pass</td></tr>
+      <tr><td class="n">3</td><td>A replaced soundtrack yields <span class="tag t-aud">audio_changed</span>, picture untouched</td><td class="n good">pass</td></tr>
+      <tr><td class="n">4</td><td><span class="mono">report.html</span> is genuinely self-contained — zero external references</td><td class="n good">pass</td></tr>
+      <tr><td class="n">5</td><td>Descriptions come back from a real local model</td><td class="n" style="color:var(--dim)">skip*</td></tr>
+      <tr><td class="n">6</td><td>Same runtime, same cuts, different picture → one <span class="tag t-rep">replace</span>, nothing else</td><td class="n good">pass</td></tr>
+      <tr><td class="n">7</td><td>A four-change TV delivery: each change found, independently</td><td class="n good">pass</td></tr>
+      <tr><td class="n">8</td><td>SDR vs HDR10 of one edit → <strong>zero</strong> regions, dynamic range reported technically</td><td class="n good">pass</td></tr>
+    </tbody>
+  </table>
+  <div class="cols c2 mt" style="margin-top:22px">
+    <p class="tiny" style="margin:0">* Check 5 needs a running Ollama and reports
+      <span class="mono">SKIP</span> without one, by design — the LLM is optional, so its
+      absence must not fail the suite.</p>
+    <p class="tiny" style="margin:0">Check 7 <em>reports</em> rather than asserts one sub-case:
+      the shortened-scene test cannot move a midpoint frame in static synthetic footage.
+      Asserting it would be asserting a property of the fixture, not of the pipeline —
+      so it prints its finding and stays honest.</p>
+  </div>
+</section>
+
+<!-- 14 ──────────────────────────────────────────── limits -->
+<section class="slide">
+  <p class="eyebrow">Stated plainly</p>
+  <h2>What this proof of concept does not do.</h2>
+  <div class="cols c2">
+    <div class="card">
+      <span class="num">KNOWN BLIND SPOT</span>
+      <h3>Colour-only changes are invisible</h3>
+      <p class="sub" style="font-size:13.5px">phash is greyscale by construction. A re-grade,
+        a colourisation, a saturation pass — all measure <span class="mono">0/64</span>. The
+        tool will report "no change" and be confidently wrong. This is the single most
+        important limitation to know before trusting a result.</p>
+    </div>
+    <div class="card">
+      <span class="num">SCOPE</span>
+      <h3>Two versions, one pair at a time</h3>
+      <p class="sub" style="font-size:13.5px">No fingerprint database, no dedup index across
+        a library, no three-way compare. Deliberately out of scope for a POC — and the
+        alignment generalises to more than two sequences only at real cost.</p>
+    </div>
+    <div class="card">
+      <span class="num">VALIDATION GAP</span>
+      <h3>Synthetic fixtures, not real film</h3>
+      <p class="sub" style="font-size:13.5px">Every fixture is generated. The MXF and HDR
+        cases are synthetic too. Shot detection on real footage — dissolves, handheld,
+        fast cutting — has not been measured, and neither has the videotoolbox encode
+        path on actual Apple silicon.</p>
+    </div>
+    <div class="card">
+      <span class="num">SENSITIVITY</span>
+      <h3>One threshold, one alphabet</h3>
+      <p class="sub" style="font-size:13.5px">Shot detection runs at a fixed threshold of
+        27.0. One frame represents an entire shot, so a change that happens <em>within</em> a
+        long take, away from its midpoint, can be missed entirely.</p>
+    </div>
+  </div>
+  <div class="note mt">
+    None of these is a surprise or a defect — they are the consequences of choices made
+    to get a real end-to-end path working. They are written down because a tool that
+    hides its blind spots is more dangerous than one that has none.
+  </div>
+</section>
+
+<!-- 15 ──────────────────────────────────────────── future -->
+<section class="slide">
+  <p class="eyebrow">Where this goes next</p>
+  <h2 style="margin-bottom:16px">Future expansion.</h2>
+  <div class="cols c3 dense">
+    <div class="card">
+      <span class="num">NEAR — CLOSES A KNOWN GAP</span>
+      <h3>A colour signal beside the luma one</h3>
+      <p class="sub" style="font-size:13px">A per-shot colour histogram, compared on its own
+        axis, turns the greyscale blind spot into a reported <span class="tag t-rep">graded</span>
+        region. Same architecture — a second annotation pass, not a change to the
+        alignment.</p>
+    </div>
+    <div class="card">
+      <span class="num">NEAR — TRUSTWORTHINESS</span>
+      <h3>Validation on real footage</h3>
+      <p class="sub" style="font-size:13px">Run the suite against genuine multi-version
+        titles. Measure shot detection through dissolves and fades, and settle the
+        within-a-long-take case that check 7 currently only reports.</p>
+    </div>
+    <div class="card">
+      <span class="num">NEAR — FITS THE WORKFLOW</span>
+      <h3>EDL / AAF export</h3>
+      <p class="sub" style="font-size:13px">Regions already carry timecodes on both sides.
+        Emitting an EDL puts the findings straight into the tool the editor already has
+        open, instead of a report they must retype from.</p>
+    </div>
+    <div class="card">
+      <span class="num">MEDIUM — SENSITIVITY</span>
+      <h3>Multi-frame shots, sub-shot alignment</h3>
+      <p class="sub" style="font-size:13px">Hash several frames per shot rather than the
+        midpoint alone, and align <em>within</em> a matched pair to locate a trim inside a
+        long take. Costs linearly; buys back the sensitivity given up at stage 4.</p>
+    </div>
+    <div class="card">
+      <span class="num">MEDIUM — SCALE</span>
+      <h3>A fingerprint store</h3>
+      <p class="sub" style="font-size:13px">Fingerprints are already cached per file. Persist
+        them and the question changes from "how do these two differ" to <strong>"which version
+        in the library is this, and what is it closest to"</strong> — with no re-decode.</p>
+    </div>
+    <div class="card">
+      <span class="num">MEDIUM — COVERAGE</span>
+      <h3>Subtitles and burn-ins as a third track</h3>
+      <p class="sub" style="font-size:13px">Compliance and localisation differences often
+        live entirely in the text layer. It aligns exactly like the other two — same
+        sequence, same algorithm, third annotation.</p>
+    </div>
+    <div class="card">
+      <span class="num">LONGER — N-WAY</span>
+      <h3>Beyond two versions</h3>
+      <p class="sub" style="font-size:13px">A version <em>tree</em> across every cut of a title:
+        which derives from which, what each one uniquely contains. Progressive alignment
+        against a reference, the way multiple sequence alignment actually does it.</p>
+    </div>
+    <div class="card">
+      <span class="num">LONGER — INTEGRATION</span>
+      <h3>Headless mode in a delivery pipeline</h3>
+      <p class="sub" style="font-size:13px">The JSON contract is already stable and the
+        stages are already a graph. Running on ingest — every new master diffed against
+        its predecessor automatically — is a scheduling problem, not a research one.</p>
+    </div>
+    <div class="card">
+      <span class="num">LONGER — THE MODEL</span>
+      <h3>Better prose, same boundary</h3>
+      <p class="sub" style="font-size:13px">Larger local models, shot-level captions,
+        scene-level summaries. The boundary does not move: the model describes what
+        alignment found. Detection stays arithmetic.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 16 ──────────────────────────────────────────── close -->
+<section class="slide">
+  <p class="eyebrow">In one slide</p>
+  <h2>What was built, and why it holds up.</h2>
+  <div class="cols c2">
+    <div>
+      <ul style="font-size:16px">
+        <li>Two cuts of a title in, a <strong>timecoded plain-English report</strong> out.</li>
+        <li>The hard part is sequence alignment, and it is solved with a
+            <strong>real algorithm</strong> — Needleman-Wunsch, optimal, vectorised, no model
+            anywhere near it.</li>
+        <li>Picture decides the timeline; <strong>audio and technical metadata annotate it</strong>
+            without ever corrupting it.</li>
+        <li>The LLM is <strong>optional and last</strong>. Switch it off and you lose sentences,
+            not findings.</li>
+        <li>Every claim on these slides is a <strong>measured number</strong> from this codebase —
+            including the ones that are unflattering.</li>
+        <li>It runs entirely on one laptop. Nothing leaves the machine.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <span class="num">THE SHAPE OF THE ARGUMENT</span>
+      <p class="sub" style="font-size:14.5px">A version-diff tool is only worth having if
+        its output can be <strong>trusted without re-checking it by hand</strong>. That is why the
+        detection path is deterministic arithmetic, why the blind spots are written down
+        rather than buried, and why the model was kept out of the part that decides what
+        changed.</p>
+      <p class="sub" style="font-size:14.5px;margin-bottom:0">Everything in the expansion
+        list adds <em>signals</em> and <em>reach</em>. None of it requires moving that boundary.</p>
+      <div class="cols c2 mt" style="gap:12px">
+        <div class="stat" style="padding:13px 15px">
+          <span class="big" style="font-size:22px">6 300</span>
+          <span class="cap">lines, Python + TypeScript</span>
+        </div>
+        <div class="stat" style="padding:13px 15px">
+          <span class="big" style="font-size:22px">0</span>
+          <span class="cap">cloud calls, API keys, or bytes off the machine</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="tiny mt" style="margin-top:24px">Vidiff · run it with
+    <span class="mono">python app.py</span> → <span class="mono">http://127.0.0.1:8765</span> ·
+    verify it with <span class="mono">python verify.py</span></p>
+</section>
+
+</div>
+
+<div id="hud">
+  <span class="name">Vidiff</span>
+  <span class="mid"><kbd>←</kbd> <kbd>→</kbd> move · <kbd>F</kbd> fullscreen</span>
+  <span class="nav">
+    <button id="prev" aria-label="Previous slide">‹</button>
+    <button id="next" aria-label="Next slide">›</button>
+    <span id="count"></span>
+  </span>
+</div>
+
+<script>
+(function () {
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var bar = document.getElementById('bar');
+  var count = document.getElementById('count');
+  var i = 0;
+
+  function show(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach(function (s, k) { s.classList.toggle('on', k === i); });
+    slides[i].scrollTop = 0;
+    bar.style.width = ((i + 1) / slides.length * 100) + '%';
+    count.textContent = (i + 1) + ' / ' + slides.length;
+    if (location.hash !== '#' + (i + 1)) history.replaceState(null, '', '#' + (i + 1));
+  }
+
+  document.getElementById('prev').onclick = function () { show(i - 1); };
+  document.getElementById('next').onclick = function () { show(i + 1); };
+
+  document.addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    switch (e.key) {
+      case 'ArrowRight': case 'PageDown': case ' ': show(i + 1); e.preventDefault(); break;
+      case 'ArrowLeft':  case 'PageUp':          show(i - 1); e.preventDefault(); break;
+      case 'Home': show(0); e.preventDefault(); break;
+      case 'End':  show(slides.length - 1); e.preventDefault(); break;
+      case 'f': case 'F':
+        if (document.fullscreenElement) document.exitFullscreen();
+        else document.documentElement.requestFullscreen();
+        break;
+    }
+  });
+
+  // Swipe, for presenting from a tablet.
+  var x0 = null;
+  document.addEventListener('touchstart', function (e) { x0 = e.touches[0].clientX; }, {passive: true});
+  document.addEventListener('touchend', function (e) {
+    if (x0 === null) return;
+    var dx = e.changedTouches[0].clientX - x0;
+    if (Math.abs(dx) > 55) show(i + (dx < 0 ? 1 : -1));
+    x0 = null;
+  }, {passive: true});
+
+  var start = parseInt((location.hash || '').slice(1), 10);
+  show(isNaN(start) ? 0 : start - 1);
+})();
+</script>
+</body>
+</html>
