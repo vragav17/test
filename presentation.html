@@ -1,0 +1,1490 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vidiff · What changed between two cuts?</title>
+<style>
+/* ──────────────────────────────────────────────────────────── tokens
+   Minimal by rule: the interface is monochrome, and saturated colour is
+   reserved entirely for the four region semantics. If something is red,
+   it means "deleted" — never "decorative". */
+:root{
+  --bg:#0B0C0E;
+  --ink:#EDEEF0;
+  --mut:#8A8F98;
+  --fade:#575C64;
+  --line:#1C1F24;
+  --line2:#2A2E35;
+
+  --del:#D2595E;
+  --ins:#57A877;
+  --rep:#C99A42;
+  --aud:#8878C0;
+
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:#000;overflow:hidden}
+body{font-family:var(--sans);color:var(--ink);-webkit-font-smoothing:antialiased}
+
+/* Fixed 1280×720 stage, scaled to whatever it is shown on. */
+#viewport{position:fixed;inset:0;display:grid;place-items:center;background:var(--bg)}
+#stage{position:relative;z-index:2;width:1280px;height:720px;transform-origin:center;flex:none;pointer-events:none}
+#stage [data-live]{pointer-events:auto}
+
+/* ──────────────────────────────────────────────────────────── slides */
+.slide{position:absolute;inset:0;padding:74px 84px 84px;display:flex;flex-direction:column;
+  opacity:0;visibility:hidden;transition:opacity .3s ease}
+.slide.live{opacity:1;visibility:visible}
+.slide.cover{justify-content:center}
+.slide.tight{padding:52px 72px 66px}
+
+h1{font-size:62px;line-height:1.04;letter-spacing:-.035em;margin:0;font-weight:600}
+h2{font-size:38px;line-height:1.14;letter-spacing:-.025em;margin:0;font-weight:560;max-width:22ch;text-wrap:balance}
+h3{font-size:18px;line-height:1.3;margin:0;font-weight:560;letter-spacing:-.01em}
+p{margin:0;font-size:18px;line-height:1.62;color:var(--mut)}
+.lede{font-size:21px;line-height:1.58;max-width:52ch;margin-top:20px;color:var(--mut)}
+.small{font-size:14.5px;line-height:1.6;color:var(--fade)}
+.mono{font-family:var(--mono)}
+.ink{color:var(--ink)} .mut{color:var(--mut)} .fade{color:var(--fade)}
+.de{color:var(--del)} .in{color:var(--ins)} .re{color:var(--rep)} .au{color:var(--aud)}
+em{font-style:italic;color:var(--mut)}
+b,strong{font-weight:560;color:var(--ink)}
+
+.eyebrow{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--fade);
+  margin:0 0 20px;font-weight:500}
+.body{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;gap:26px;margin-top:30px}
+.body.top{justify-content:flex-start;margin-top:26px}
+
+/* progressive reveal */
+.step{opacity:0;transform:translateY(8px);transition:opacity .3s ease,transform .3s ease}
+.step.on{opacity:1;transform:none}
+
+/* ──────────────────────────────────────────────────────── structure */
+.row{display:flex;gap:30px;align-items:flex-start}
+.row.mid{align-items:center}
+.grow{flex:1;min-width:0}
+.cols{display:grid;gap:30px}
+.c2{grid-template-columns:1fr 1fr}
+.c3{grid-template-columns:repeat(3,1fr)}
+.c4{grid-template-columns:repeat(4,1fr)}
+
+/* An "item" is the only card in this deck: a hairline rule, a label, prose. */
+.item{border-top:1px solid var(--line2);padding-top:14px}
+.item h3{margin-bottom:8px}
+.item p{font-size:15.5px;line-height:1.55}
+.item .n{font-family:var(--mono);font-size:11px;color:var(--fade);letter-spacing:.14em;
+  display:block;margin-bottom:9px}
+
+.box{border:1px solid var(--line);border-radius:6px;padding:20px 22px}
+.rule{height:1px;background:var(--line2);margin:0}
+
+.pre{font-family:var(--mono);font-size:16px;line-height:1.85;white-space:pre;color:var(--ink);overflow-x:auto}
+.note{border-left:1px solid var(--line2);padding-left:20px;font-size:16.5px;line-height:1.6;color:var(--mut)}
+.note b{color:var(--ink)}
+
+dl.kv{display:grid;grid-template-columns:auto 1fr;gap:9px 22px;margin:0;font-size:16px}
+dl.kv dt{font-family:var(--mono);font-size:12.5px;color:var(--fade);letter-spacing:.06em;
+  text-transform:uppercase;padding-top:3px;white-space:nowrap}
+dl.kv dd{margin:0;color:var(--mut)}
+
+table.t{width:100%;border-collapse:collapse;font-size:16px}
+table.t th{text-align:left;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--fade);
+  font-weight:500;padding:0 18px 11px 0;border-bottom:1px solid var(--line2)}
+table.t td{padding:11px 18px 11px 0;border-bottom:1px solid var(--line);color:var(--mut);vertical-align:top}
+table.t tr:last-child td{border-bottom:none}
+table.t td.n{font-family:var(--mono);color:var(--ink);white-space:nowrap}
+
+/* section divider */
+.divider{justify-content:center}
+.divider .num{font-family:var(--mono);font-size:12px;letter-spacing:.3em;color:var(--fade)}
+.divider h2{font-size:50px;margin-top:18px;max-width:none}
+
+/* ─────────────────────────────────────────────────────────── widgets */
+.btn{font:inherit;font-size:14px;padding:8px 15px;border-radius:5px;cursor:pointer;
+  background:transparent;color:var(--mut);border:1px solid var(--line2);transition:.15s}
+.btn:hover{border-color:var(--mut);color:var(--ink)}
+.btn:disabled{opacity:.28;cursor:not-allowed}
+.btn.p{border-color:var(--mut);color:var(--ink)}
+.btn.p:hover{background:rgba(237,238,240,.06)}
+
+.seg{display:inline-flex;gap:2px;border:1px solid var(--line2);border-radius:6px;padding:3px}
+.seg button{font:inherit;font-size:14px;padding:7px 14px;border:0;border-radius:4px;background:transparent;
+  color:var(--fade);cursor:pointer;transition:.15s;white-space:nowrap}
+.seg button:hover{color:var(--mut)}
+.seg button.sel{background:rgba(237,238,240,.09);color:var(--ink)}
+
+input[type=range]{-webkit-appearance:none;appearance:none;height:2px;border-radius:2px;background:var(--line2);
+  outline:none;cursor:pointer;width:100%}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--ink);border:0}
+input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--ink);border:0}
+input[type=text]{font:inherit;font-family:var(--mono);font-size:17px;letter-spacing:.14em;width:100%;
+  padding:10px 13px;border-radius:5px;background:transparent;border:1px solid var(--line2);color:var(--ink);outline:none}
+input[type=text]:focus{border-color:var(--mut)}
+
+/* sequence tracks — shared by the DNA, alignment and timeline boards */
+.trk{display:flex;gap:3px;flex:1;min-width:0}
+.trk .c{flex:1;min-width:0;height:42px;border-radius:4px;display:grid;place-items:center;
+  font-family:var(--mono);font-size:14px;color:var(--ink);
+  background:rgba(237,238,240,.05);border:1px solid transparent;transition:.25s}
+.trk .c.eq{background:rgba(237,238,240,.05)}
+.trk .c.del{background:rgba(210,89,94,.17);border-color:rgba(210,89,94,.5);color:var(--del)}
+.trk .c.ins{background:rgba(87,168,119,.17);border-color:rgba(87,168,119,.5);color:var(--ins)}
+.trk .c.rep{background:rgba(201,154,66,.17);border-color:rgba(201,154,66,.5);color:var(--rep)}
+.trk .c.aud{background:rgba(136,120,192,.17);border-color:rgba(136,120,192,.5);color:var(--aud)}
+.trk .c.gap{background:transparent;border:1px dashed var(--line2);color:var(--fade)}
+.trk .c.on{background:rgba(237,238,240,.1);border-color:var(--line2)}
+.trk .c.off{background:transparent;border:1px solid var(--line);color:var(--fade)}
+.trk .c.dim{opacity:.26}
+.trkrow{display:flex;gap:14px;align-items:center}
+.trklbl{font-family:var(--mono);font-size:12px;color:var(--fade);width:58px;flex:none;
+  letter-spacing:.1em;text-transform:uppercase}
+.trk.sm .c{height:34px;font-size:13px}
+
+.key{display:flex;gap:20px;flex-wrap:wrap;font-size:13.5px;color:var(--fade);align-items:center}
+.key span{display:inline-flex;align-items:center;gap:7px}
+.dot{width:8px;height:8px;border-radius:2px;display:inline-block;flex:none}
+
+/* matrix */
+.mx{border-collapse:separate;border-spacing:3px;font-family:var(--mono)}
+.mx td,.mx th{width:37px;height:32px;text-align:center;font-size:13px;font-weight:400;padding:0;border-radius:4px}
+.mx th{color:var(--fade);font-size:12px}
+.mx td{background:transparent;color:transparent;border:1px solid var(--line);transition:.18s}
+.mx td.done{color:var(--mut);background:rgba(237,238,240,.03)}
+.mx td.zero{color:var(--fade)}
+.mx td.cur{border-color:var(--ink);color:var(--ink);background:rgba(237,238,240,.09)}
+.mx td.src{border-color:var(--line2);color:var(--mut)}
+.mx td.path{border-color:rgba(87,168,119,.6);color:var(--ins);background:rgba(87,168,119,.1)}
+
+/* option lists */
+.opt{border:1px solid var(--line);background:transparent;border-radius:5px;padding:8px 13px;
+  font:inherit;font-size:14.5px;color:var(--mut);cursor:pointer;transition:.15s;text-align:left;width:100%;
+  display:flex;justify-content:space-between;gap:12px;align-items:center}
+.opt:hover{border-color:var(--line2);color:var(--ink)}
+.opt.sel{border-color:var(--mut);color:var(--ink);background:rgba(237,238,240,.05)}
+.opt.off{opacity:.4}
+.opt .v{font-family:var(--mono);font-size:13px;color:var(--fade)}
+.opt.sel .v{color:var(--mut)}
+
+/* band scale */
+.band{position:relative;height:26px;display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.band .z{height:100%;display:grid;place-items:center;font-family:var(--mono);font-size:11px;
+  letter-spacing:.1em;color:var(--fade);border-right:1px solid var(--line)}
+.band .z:last-child{border-right:0}
+.needle{position:absolute;top:-6px;width:1px;height:38px;background:var(--ink);transition:left .35s ease}
+.needle::after{content:attr(data-v);position:absolute;top:-20px;left:50%;transform:translateX(-50%);
+  font-family:var(--mono);font-size:12px;color:var(--ink);white-space:nowrap}
+
+/* check rows */
+.ck{display:grid;grid-template-columns:24px 1fr 76px;align-items:center;gap:14px;padding:5px 0;
+  border-bottom:1px solid var(--line);font-size:15.5px;transition:.25s}
+.ck:last-child{border-bottom:0}
+.ck .n{font-family:var(--mono);font-size:12.5px;color:var(--fade)}
+.ck .d{color:var(--fade);line-height:1.4}
+.ck .v{font-family:var(--mono);font-size:12.5px;text-align:right;color:var(--line2)}
+.ck.run .d{color:var(--mut)} .ck.run .v{color:var(--mut)}
+.ck.pass .d{color:var(--mut)} .ck.pass .v{color:var(--ins)}
+.ck.skip .d{color:var(--mut)} .ck.skip .v{color:var(--rep)}
+
+/* ───────────────────────────────────────────────────────────── chrome */
+#rail{position:absolute;left:84px;right:84px;bottom:36px;display:flex;align-items:center;
+  font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--fade)}
+#rail .sp{flex:1}
+#rail .cnt{font-family:var(--mono);letter-spacing:.1em}
+#bar{position:absolute;left:0;bottom:0;height:1px;background:var(--mut);width:0;transition:width .3s ease}
+
+#zoneL,#zoneR{position:fixed;top:0;bottom:0;width:clamp(56px,6vw,120px);z-index:1}
+#zoneL{left:0;cursor:w-resize}#zoneR{right:0;cursor:e-resize}
+#hintL,#hintR{position:fixed;top:50%;transform:translateY(-50%);font-size:26px;color:rgba(237,238,240,.1);
+  z-index:6;pointer-events:none;transition:.2s;user-select:none}
+#hintL{left:28px}#hintR{right:28px}
+#zoneL:hover~#hintL,#zoneR:hover~#hintR{color:rgba(237,238,240,.4)}
+
+.ovl{position:fixed;inset:0;z-index:40;background:rgba(11,12,14,.97);display:none;padding:72px;overflow:auto}
+.ovl.open{display:block}
+.ovl h3{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--fade);margin-bottom:30px}
+#help table{border-collapse:collapse}
+#help td{padding:10px 32px 10px 0;font-size:17px;color:var(--mut)}
+#help kbd{font-family:var(--mono);font-size:13px;border:1px solid var(--line2);border-radius:4px;
+  padding:3px 9px;color:var(--fade)}
+#jump ol{columns:3;column-gap:52px;margin:0;padding-left:20px}
+#jump li{font-size:16px;color:var(--fade);margin-bottom:10px;cursor:pointer;break-inside:avoid}
+#jump li:hover{color:var(--ink)}
+#jump li.cur{color:var(--ink)}
+#black{position:fixed;inset:0;background:#000;z-index:60;display:none}
+#black.open{display:block}
+#timer{position:fixed;top:18px;left:22px;z-index:31;font-family:var(--mono);font-size:12px;
+  color:var(--fade);display:none}
+#timer.open{display:block}
+#toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);z-index:50;
+  border:1px solid var(--line2);background:var(--bg);border-radius:6px;padding:9px 17px;font-size:13.5px;
+  color:var(--fade);opacity:0;transition:.25s;pointer-events:none}
+#toast.on{opacity:1}
+
+@media print{
+  html,body{overflow:visible;background:#fff}
+  #viewport{position:static;display:block}
+  #stage{transform:none!important;page-break-after:always;border:1px solid #ddd}
+  .slide{position:relative;visibility:visible!important;opacity:1!important}
+  .step{opacity:1!important;transform:none!important}
+  #zoneL,#zoneR,#hintL,#hintR,.ovl,#timer{display:none!important}
+}
+</style>
+</head>
+<body>
+
+<div id="viewport"><div id="stage">
+
+<!-- ═══════════════════════════════════════════════════════ opening ═══ -->
+<section class="slide cover" data-section="Vidiff" data-title="Title">
+  <p class="eyebrow">Local video analysis · proof of concept</p>
+  <h1>Vidiff</h1>
+  <p class="lede step" style="max-width:62ch">Two cuts of the same title go in.<br>
+    A timecoded, plain-English report of what changed comes out.</p>
+  <div class="step" style="margin-top:44px;max-width:640px">
+    <dl class="kv">
+      <dt>Method</dt><dd>Needleman-Wunsch global alignment over perceptual hashes</dd>
+      <dt>Runs on</dt><dd>One laptop. No cloud, no API keys, nothing leaves the machine</dd>
+      <dt>Boards</dt><dd>Fourteen live — click, drag and type your way through them</dd>
+    </dl>
+  </div>
+</section>
+
+<section class="slide" data-section="Vidiff" data-title="Contents">
+  <p class="eyebrow">Contents</p>
+  <h2>Where we are going</h2>
+  <div class="body top">
+    <div class="cols c3 step">
+      <div class="item"><span class="n">01 — 03</span><h3>The problem</h3>
+        <p>Two files, no trustworthy metadata, and four obvious answers that all fail.</p></div>
+      <div class="item"><span class="n">04 — 06</span><h3>The approach</h3>
+        <p>Borrowed from genome alignment. Shots as letters, and a real algorithm on top.</p></div>
+      <div class="item"><span class="n">07 — 08</span><h3>The build</h3>
+        <p>The pipeline, the app, the bugs real formats found, and where it goes next.</p></div>
+    </div>
+    <p class="note step" style="margin-top:6px">This is not a video problem. It is a
+      <b>sequence alignment</b> problem — and sequence alignment has an exact answer that is
+      sixty years old.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════ 01 · the problem ═══ -->
+<section class="slide divider" data-section="The problem" data-title="§ The problem">
+  <p class="num">SECTION 01</p>
+  <h2>The problem</h2>
+  <p class="lede step">Two files. Same title. Nobody can say what is different.</p>
+</section>
+
+<section class="slide tight" data-section="The problem" data-title="Board · two files">
+  <p class="eyebrow">Board · click the claims</p>
+  <h2>Two files land on a desk</h2>
+  <div class="body top"><div class="step" data-fx="versions"><div data-live data-host></div></div></div>
+</section>
+
+<section class="slide" data-section="The problem" data-title="Who needs the answer">
+  <p class="eyebrow">The need</p>
+  <h2>Four people need this answer</h2>
+  <div class="body top">
+    <div class="cols c4 step">
+      <div class="item"><h3>Archive</h3><p>Is this a version we already hold? Storing the same
+        cut twice is expensive. Losing a unique one is worse.</p></div>
+      <div class="item"><h3>Compliance</h3><p>A cut was ordered for a territory. Did the supplier
+        make it — and only it?</p></div>
+      <div class="item"><h3>Localisation</h3><p>Every change to the picture invalidates subtitles
+        and dubs downstream. Which ones moved?</p></div>
+      <div class="item"><h3>QC</h3><p>A new master arrived. Is the difference editorial, or did
+        something break in the transcode?</p></div>
+    </div>
+    <p class="note step">Today this is a person scrubbing two timelines side by side. It takes hours,
+      it is done under deadline, and it is the first task dropped when the deadline wins.</p>
+    <p class="small step">So a tool only helps if its output can be trusted <em>without</em> re-checking
+      it by hand. That one requirement shapes every decision in the rest of this deck.</p>
+  </div>
+</section>
+
+<section class="slide tight" data-section="The problem" data-title="Board · why they fail">
+  <p class="eyebrow">Board · try each strategy</p>
+  <h2>Every obvious answer fails</h2>
+  <div class="body top"><div class="step" data-fx="naive"><div data-live data-host></div></div></div>
+</section>
+
+<!-- ══════════════════════════════════════════════ 02 · the approach ═══ -->
+<section class="slide divider" data-section="The approach" data-title="§ The approach">
+  <p class="num">SECTION 02</p>
+  <h2>The approach</h2>
+  <p class="lede step">Biologists solved this in 1970. For DNA.</p>
+</section>
+
+<section class="slide tight" data-section="The approach" data-title="Board · DNA and film">
+  <p class="eyebrow">Board · switch alphabets · type your own bases</p>
+  <h2>The same algorithm, twice</h2>
+  <div class="body top"><div class="step" data-fx="dna"><div data-live data-host></div></div></div>
+</section>
+
+<section class="slide" data-section="The approach" data-title="The translation">
+  <p class="eyebrow">One table</p>
+  <h2>Genome alignment, with a different alphabet</h2>
+  <div class="body top">
+    <table class="t step" style="max-width:1000px">
+      <thead><tr><th style="width:150px"></th><th>In genomics</th><th>In Vidiff</th></tr></thead>
+      <tbody>
+        <tr><td class="n fade">letter</td><td>a base — A C G T</td><td class="ink">a <b>shot</b> — the span between two cuts</td></tr>
+        <tr><td class="n fade">alphabet</td><td>four symbols</td><td class="ink">a <b>64-bit perceptual hash</b></td></tr>
+        <tr><td class="n fade">similarity</td><td>a substitution matrix</td><td class="ink"><b>Hamming distance</b> between hashes</td></tr>
+        <tr><td class="n fade">algorithm</td><td>Needleman-Wunsch</td><td class="ink"><b>Needleman-Wunsch</b> — unchanged</td></tr>
+        <tr><td class="n fade">divergence</td><td>indel · substitution</td><td class="ink">cut · insert · reshoot</td></tr>
+      </tbody>
+    </table>
+    <p class="note step">A shot is the right unit on both counts. It is <b>editorially meaningful</b> —
+      cuts are exactly where editors work — and a feature has a few thousand of them rather than a few
+      hundred thousand frames.</p>
+  </div>
+</section>
+
+<section class="slide tight" data-section="The approach" data-title="Board · the hash">
+  <p class="eyebrow">Board · apply a transform</p>
+  <h2>What a 64-bit hash does and does not see</h2>
+  <div class="body top"><div class="step" data-fx="phash"><div data-live data-host></div></div></div>
+</section>
+
+<section class="slide tight" data-section="The approach" data-title="Board · the bands">
+  <p class="eyebrow">Board · drag the distance</p>
+  <h2>Three bands, four numbers</h2>
+  <div class="body top"><div class="step" data-fx="bands"><div data-live data-host></div></div></div>
+</section>
+
+<section class="slide tight" data-section="The approach" data-title="Board · Needleman-Wunsch">
+  <p class="eyebrow">Board · the judged component</p>
+  <h2>Needleman-Wunsch, cell by cell</h2>
+  <div class="body top"><div class="step" data-fx="align"><div data-live data-host></div></div></div>
+</section>
+
+<section class="slide" data-section="The approach" data-title="The vectorisation">
+  <p class="eyebrow">The one optimisation</p>
+  <h2>A sequential-looking recurrence that is not</h2>
+  <div class="body top">
+    <div class="cols c2 step" style="gap:44px">
+      <div>
+        <p class="small" style="margin-bottom:14px">The left-neighbour term depends on the cell beside it:</p>
+        <div class="pre">H[i][j] = max(…, <span class="re">H[i][j-1] + gap</span>)</div>
+        <p class="small" style="margin-top:16px">Inherently serial — unless the gap penalty is linear.</p>
+      </div>
+      <div>
+        <p class="small" style="margin-bottom:14px">Substitute <span class="mono">G[j] = H[i][j] − j·gap</span>:</p>
+        <div class="pre">G[j] = max(best[j] − j·gap, <span class="in">G[j-1]</span>)
+
+     = <span class="in">np.maximum.accumulate(…)</span></div>
+        <p class="small" style="margin-top:16px">Three vector operations per row, not an inner loop.</p>
+      </div>
+    </div>
+    <p class="note step">A feature-length pair aligns in seconds, on a laptop, in pure numpy. No
+      bioinformatics library, no heuristic, and <b>no model anywhere near it</b> — <span class="mono">align.py</span>
+      contains zero references to one, verifiable with a single grep.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════ 03 · the second signal ═══ -->
+<section class="slide divider" data-section="The second signal" data-title="§ The second signal">
+  <p class="num">SECTION 03</p>
+  <h2>The second signal</h2>
+  <p class="lede step">A re-dub changes nothing on screen.</p>
+</section>
+
+<section class="slide tight" data-section="The second signal" data-title="Board · the audio pass">
+  <p class="eyebrow">Board · switch the audio signal off</p>
+  <h2>Six shots that look identical</h2>
+  <div class="body top"><div class="step" data-fx="audio"><div data-live data-host></div></div></div>
+</section>
+
+<section class="slide" data-section="The second signal" data-title="Annotates, never scores">
+  <p class="eyebrow">A deliberate boundary</p>
+  <h2>Audio annotates the timeline. It never scores it.</h2>
+  <div class="body top">
+    <div class="cols c2 step" style="gap:44px">
+      <div>
+        <p class="small" style="margin-bottom:14px">The scoring function sees picture only:</p>
+        <div class="pre" style="font-size:15px"><span class="fade">def</span> score_matrix(a_bits, b_bits):
+    d = hamming_matrix(a_bits, b_bits)
+    s = np.full(d.shape, MISMATCH_SCORE)
+    s[d &lt;= WEAK_MAX_DISTANCE]  = WEAK_SCORE
+    s[d &lt;= MATCH_MAX_DISTANCE] = MATCH_SCORE
+    <span class="fade">return</span> s</div>
+      </div>
+      <div>
+        <p class="small" style="margin-bottom:14px">…and afterwards, over aligned pairs only:</p>
+        <div class="pre" style="font-size:15px"><span class="fade">if</span> op.type == <span class="in">"equal"</span> <span class="fade">and</span> ahash_distance &gt; <span class="re">16</span>:
+    op.type = <span class="au">"audio_changed"</span></div>
+        <p class="small" style="margin-top:18px">A second pass over what the alignment already
+          matched — not a second term inside it.</p>
+      </div>
+    </div>
+    <p class="note step">An audio term inside the scoring function would make the alignment's behaviour
+      a matter of tuning two weights against each other. <b>The alignment is the part that has to be
+      defensible</b>, so nothing else is allowed to move it. A corrupt audio track can annotate
+      wrongly; it can never corrupt the structure.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════ 04 · the pipeline ═══ -->
+<section class="slide divider" data-section="The pipeline" data-title="§ The pipeline">
+  <p class="num">SECTION 04</p>
+  <h2>The pipeline</h2>
+  <p class="lede step">Eight stages, two parallel lanes, one merge.</p>
+</section>
+
+<section class="slide tight" data-section="The pipeline" data-title="Board · the stages">
+  <p class="eyebrow">Board · click any stage</p>
+  <h2>What each stage actually does</h2>
+  <div class="body top"><div class="step" data-fx="pipeline"><div data-live data-host></div></div></div>
+</section>
+
+<section class="slide tight" data-section="The pipeline" data-title="Board · the output">
+  <p class="eyebrow">Board · click a region</p>
+  <h2>The output: regions, with both timecodes</h2>
+  <div class="body top"><div class="step" data-fx="regions"><div data-live data-host></div></div></div>
+</section>
+
+<section class="slide tight" data-section="The pipeline" data-title="Board · the model">
+  <p class="eyebrow">Board · switch the model off</p>
+  <h2>The model writes the sentence. It never finds the change.</h2>
+  <div class="body top"><div class="step" data-fx="llm"><div data-live data-host></div></div></div>
+</section>
+
+<section class="slide" data-section="The pipeline" data-title="Why that boundary">
+  <p class="eyebrow">Three reasons the boundary sits there</p>
+  <h2>Detection is arithmetic. Description is prose.</h2>
+  <div class="body top">
+    <div class="cols c3 step">
+      <div class="item"><h3>Reproducible</h3><p>The same two files give the same regions — run to run,
+        machine to machine, today and next year. No sampling, no temperature, no drift.</p></div>
+      <div class="item"><h3>Auditable</h3><p>A disputed result traces to a Hamming distance and a
+        scoring rule you can read in twenty lines. Not to a token that happened to be sampled.</p></div>
+      <div class="item"><h3>Honest about failure</h3><p>A wrong description is obvious beside its own
+        thumbnails. A wrong <em>timecode</em> would be undetectable — so the model never produces one.</p></div>
+    </div>
+    <p class="note step">The build order made this concrete: stages 0–5 and 7 had to work with the
+      model <b>disabled</b> before stage 6 was written at all.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════ 05 · app ═══ -->
+<section class="slide" data-section="The app" data-title="The application">
+  <p class="eyebrow">The proof of concept</p>
+  <h2>Vidiff, as a workflow application</h2>
+  <div class="body top">
+    <div class="cols c3 step">
+      <div class="item"><span class="n">PICK</span><h3>Two files, two clicks</h3>
+        <p>A built-in browser walks the local disk. No upload, no copy. Labels, thresholds, and a
+          switch for the descriptions.</p></div>
+      <div class="item"><span class="n">WATCH</span><h3>The graph runs in front of you</h3>
+        <p>Both lanes light up in parallel and merge at alignment. Server-sent events stream every
+          stage transition and log line live.</p></div>
+      <div class="item"><span class="n">READ</span><h3>Grouped, thumbnailed, audible</h3>
+        <p>Changes group by kind. Each region shows both sides' thumbnails, and each column carries
+          its own play button.</p></div>
+    </div>
+    <div class="row step" style="gap:44px;margin-top:8px">
+      <div class="grow"><dl class="kv">
+        <dt>Backend</dt><dd>FastAPI + uvicorn, bound to <span class="mono">127.0.0.1</span> only</dd>
+        <dt>Frontend</dt><dd>React 19 + Vite + TypeScript</dd>
+        <dt>Progress</dt><dd>SSE, 200 ms poll — no queue to deadlock</dd>
+        <dt>History</dt><dd>Every job kept under <span class="mono">.cache/jobs/</span>, re-openable</dd>
+      </dl></div>
+      <div class="grow"><p class="note" style="font-size:15.5px">An <span class="mono au">audio_changed</span>
+        region is a claim about sound, and the only real way to check it is to listen. Clips are cut on
+        demand from the <b>original</b> where it is still on disk: one lossy generation instead of two,
+        and every audio track rather than whichever one ffmpeg would have picked.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════ 06 · what formats taught ═══ -->
+<section class="slide divider" data-section="Real formats" data-title="§ Real formats">
+  <p class="num">SECTION 06</p>
+  <h2>What real formats taught us</h2>
+  <p class="lede step">Three bugs that only genuine delivery files could find.</p>
+</section>
+
+<section class="slide tight" data-section="Real formats" data-title="Board · MXF tracks">
+  <p class="eyebrow">Board · bug 01</p>
+  <h2>Five of six audio tracks silently vanished</h2>
+  <div class="body top"><div class="step" data-fx="mxf"><div data-live data-host></div></div></div>
+</section>
+
+<section class="slide tight" data-section="Real formats" data-title="Board · HDR">
+  <p class="eyebrow">Board · bug 02</p>
+  <h2>Every shot faked a replace</h2>
+  <div class="body top"><div class="step" data-fx="hdr"><div data-live data-host></div></div></div>
+</section>
+
+<section class="slide" data-section="Real formats" data-title="The cache bug">
+  <p class="eyebrow">Bug 03 · the subtle one</p>
+  <h2>A fixed pipeline, still producing broken output</h2>
+  <div class="body top">
+    <div class="cols c2 step" style="gap:44px">
+      <div class="item"><h3 class="de">The trap</h3><p>Both fixes above change how a proxy is
+        <em>built</em>. A proxy cached from before the fix is still a perfectly valid file, so it was
+        reused — and the bug survived its own fix, invisibly, on every machine that had run the tool.</p></div>
+      <div class="item"><h3 class="in">The fix</h3><p><span class="mono">PROXY_PIPELINE_VERSION</span>
+        is part of the cache key. Bump it and every stale proxy is rebuilt. The general lesson: a cache
+        keyed on inputs alone is wrong the moment the <em>transform</em> can change.</p></div>
+    </div>
+    <p class="note step">And one that cut the other way. The leading theory for the audio problem was
+      double-lossy encoding. Measured, it cost <b>0.4 dB</b> — nothing. It was not the cause, and saying
+      so was more useful than claiming the credit.</p>
+    <p class="small step">That is the habit the whole project runs on: form the hypothesis, measure it,
+      and report the measurement even when it contradicts you.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════ 07 · does it work ═══ -->
+<section class="slide tight" data-section="Verification" data-title="Board · the suite">
+  <p class="eyebrow">Board · run the suite</p>
+  <h2>The pipeline is never shown the answer</h2>
+  <div class="body top"><div class="step" data-fx="checks"><div data-live data-host></div></div></div>
+</section>
+
+<section class="slide" data-section="Verification" data-title="Stated limits">
+  <p class="eyebrow">Stated plainly</p>
+  <h2>What this proof of concept does not do</h2>
+  <div class="body top">
+    <div class="cols c4 step">
+      <div class="item"><h3 class="de">Colour is invisible</h3><p>phash is greyscale by construction.
+        A re-grade measures <span class="mono">0/64</span>. The tool reports "no change" and is
+        confidently wrong.</p></div>
+      <div class="item"><h3>Two versions only</h3><p>No fingerprint database, no library-wide dedup,
+        no three-way compare. Deliberately out of scope.</p></div>
+      <div class="item"><h3>Synthetic fixtures</h3><p>Every fixture is generated, MXF and HDR included.
+        Real footage — dissolves, handheld, fast cutting — is unmeasured.</p></div>
+      <div class="item"><h3>One frame per shot</h3><p>A change <em>inside</em> a long take, away from
+        its midpoint, can be missed entirely.</p></div>
+    </div>
+    <p class="note step">None of these is a surprise or a defect — they follow from choosing a working
+      end-to-end path over completeness. <b>They are written down because a tool that hides its blind
+      spots is more dangerous than one that has none.</b></p>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 08 · what next ═══ -->
+<section class="slide tight" data-section="What is next" data-title="Board · the roadmap">
+  <p class="eyebrow">Board · filter by horizon</p>
+  <h2>Where this goes next</h2>
+  <div class="body top"><div class="step" data-fx="roadmap"><div data-live data-host></div></div></div>
+</section>
+
+<section class="slide cover" data-section="What is next" data-title="Close">
+  <p class="eyebrow">In one slide</p>
+  <h2 style="font-size:44px;max-width:20ch">Detection is arithmetic.<br>Everything else is presentation.</h2>
+  <div class="step" style="margin-top:44px;max-width:760px">
+    <dl class="kv">
+      <dt>What it does</dt><dd>Two cuts in, a timecoded plain-English report out — picture, audio and
+        technical differences, each on its own axis</dd>
+      <dt>Why it holds</dt><dd>A real alignment algorithm with no model in it, eight acceptance checks,
+        and blind spots stated rather than buried</dd>
+      <dt>Where it runs</dt><dd>One laptop — nothing leaving the machine but a call to
+        <span class="mono">localhost:11434</span></dd>
+    </dl>
+  </div>
+  <div class="step" style="margin-top:38px">
+    <p class="small mono">python app.py → http://127.0.0.1:8765 · python verify.py</p>
+  </div>
+</section>
+
+  <div id="rail">
+    <span id="railSec">Vidiff</span><span class="sp"></span><span class="cnt" id="railCnt">01 / 01</span>
+  </div>
+  <div id="bar"></div>
+</div></div>
+
+<div id="zoneL"></div><div id="zoneR"></div>
+<div id="hintL">‹</div><div id="hintR">›</div>
+
+<div class="ovl" id="help"><h3>Keyboard &amp; clicks</h3><table>
+<tr><td>Next build / next slide</td><td><kbd>→</kbd> <kbd>Space</kbd> <kbd>click the right edge</kbd></td></tr>
+<tr><td>Back</td><td><kbd>←</kbd> <kbd>click the left edge</kbd></td></tr>
+<tr><td>Next / previous slide (skip builds)</td><td><kbd>↓</kbd> <kbd>↑</kbd></td></tr>
+<tr><td>Blank the screen</td><td><kbd>B</kbd></td></tr>
+<tr><td>Jump to a slide</td><td><kbd>G</kbd></td></tr>
+<tr><td>Replay this slide's builds</td><td><kbd>R</kbd></td></tr>
+<tr><td>Session timer</td><td><kbd>T</kbd></td></tr>
+<tr><td>Fullscreen</td><td><kbd>F</kbd></td></tr>
+<tr><td>First / last slide</td><td><kbd>Home</kbd> <kbd>End</kbd></td></tr>
+<tr><td>Close any overlay</td><td><kbd>Esc</kbd></td></tr>
+</table><p class="small" style="margin-top:34px">Only the narrow strips at the far left and right edges
+move the deck. The middle of the screen belongs to the boards, so dragging a slider or typing a sequence
+can never flip the slide.</p></div>
+
+<div class="ovl" id="jump"><h3>Jump to slide</h3><ol id="jumpList"></ol></div>
+<div id="black"></div>
+<div id="timer">00:00</div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* ═══════════════════════════════════════════════════════ deck engine */
+var stage=document.getElementById('stage');
+var slides=[].slice.call(document.querySelectorAll('.slide'));
+var si=0, sj=0;
+
+function steps(s){return [].slice.call(s.querySelectorAll('.step'))}
+function fit(){ stage.style.transform='scale('+Math.min(innerWidth/1280,innerHeight/720)+')' }
+addEventListener('resize',fit);
+
+function render(){
+  slides.forEach(function(s,i){s.classList.toggle('live',i===si)});
+  var s=slides[si];
+  steps(s).forEach(function(e,i){
+    var on=i<sj;
+    if(on&&!e.classList.contains('on')){e.classList.add('on'); fire(e)}
+    if(!on) e.classList.remove('on');
+  });
+  document.getElementById('railSec').textContent=s.dataset.section||'';
+  document.getElementById('railCnt').textContent=pad(si+1)+' / '+pad(slides.length);
+  document.getElementById('bar').style.width=((si+1)/slides.length*100)+'%';
+  var lis=document.querySelectorAll('#jumpList li');
+  for(var j=0;j<lis.length;j++) lis[j].classList.toggle('cur',j===si);
+}
+function pad(n){return (n<10?'0':'')+n}
+function next(){ var st=steps(slides[si]);
+  if(sj<st.length){sj++;render();return}
+  if(si<slides.length-1){si++;sj=0;reset(slides[si]);render()} }
+function prev(){ if(sj>0){sj--;render();return}
+  if(si>0){si--;sj=steps(slides[si]).length;reset(slides[si]);render()} }
+function goSlide(i,atEnd){ if(i<0||i>=slides.length) return;
+  si=i; reset(slides[si]); sj=atEnd?steps(slides[si]).length:0; render() }
+function reset(s){ [].slice.call(s.querySelectorAll('[data-fx]')).forEach(function(e){e.dataset.fired=''}) }
+function fire(el){ var fx=el.dataset.fx; if(!fx||el.dataset.fired==='1') return;
+  el.dataset.fired='1'; if(FX[fx]) try{FX[fx](el)}catch(err){console.error(fx,err)} }
+
+document.getElementById('zoneR').addEventListener('click',function(){next()});
+document.getElementById('zoneL').addEventListener('click',function(){prev()});
+addEventListener('keydown',function(e){
+  var t=e.target;
+  if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA')){ if(e.key==='Escape') t.blur(); return }
+  var k=e.key;
+  if(k==='ArrowRight'||k===' '||k==='PageDown'){e.preventDefault();next()}
+  else if(k==='ArrowLeft'||k==='PageUp'){e.preventDefault();prev()}
+  else if(k==='ArrowDown'){e.preventDefault();goSlide(si+1,false)}
+  else if(k==='ArrowUp'){e.preventDefault();goSlide(si-1,false)}
+  else if(k==='Home'){goSlide(0,false)} else if(k==='End'){goSlide(slides.length-1,false)}
+  else if(k==='b'||k==='B'){document.getElementById('black').classList.toggle('open')}
+  else if(k==='r'||k==='R'){sj=0;reset(slides[si]);render();toast('Builds replayed')}
+  else if(k==='t'||k==='T'){toggleTimer()}
+  else if(k==='g'||k==='G'){toggleOvl('jump')}
+  else if(k==='?'||k==='/'){toggleOvl('help')}
+  else if(k==='f'||k==='F'){ if(!document.fullscreenElement) document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen(); else document.exitFullscreen() }
+  else if(k==='Escape'){[].slice.call(document.querySelectorAll('.ovl.open')).forEach(function(o){o.classList.remove('open')});
+    document.getElementById('black').classList.remove('open')}
+});
+function toggleOvl(id){ var o=document.getElementById(id), was=o.classList.contains('open');
+  [].slice.call(document.querySelectorAll('.ovl.open')).forEach(function(x){x.classList.remove('open')});
+  if(!was) o.classList.add('open') }
+var tx=null;
+addEventListener('touchstart',function(e){tx=e.touches[0].clientX},{passive:true});
+addEventListener('touchend',function(e){ if(tx===null) return;
+  var dx=e.changedTouches[0].clientX-tx; tx=null; if(Math.abs(dx)>60){ dx<0?next():prev() } },{passive:true});
+var tOut; function toast(m){ var e=document.getElementById('toast'); e.textContent=m; e.classList.add('on');
+  clearTimeout(tOut); tOut=setTimeout(function(){e.classList.remove('on')},1500) }
+var tStart=null,tInt=null;
+function toggleTimer(){ var el=document.getElementById('timer');
+  if(tInt){clearInterval(tInt);tInt=null;el.classList.remove('open');return}
+  tStart=Date.now(); el.classList.add('open');
+  tInt=setInterval(function(){ var s=Math.floor((Date.now()-tStart)/1000);
+    el.textContent=pad(Math.floor(s/60))+':'+pad(s%60) },1000) }
+
+/* ═══════════════════════════════════════════════════════════ helpers */
+function track(label,cells,sm){
+  return '<div class="trkrow"><span class="trklbl">'+label+'</span><div class="trk'+(sm?' sm':'')+'">'+
+    cells.map(function(c){ return '<div class="c '+(c.cls||'')+'">'+(c.t||'')+'</div>' }).join('')+'</div></div>';
+}
+function tc(sec){ return pad(Math.floor(sec/3600))+':'+pad(Math.floor(sec%3600/60))+':'+pad(Math.floor(sec%60)) }
+function band(d){
+  if(d<=10) return {k:'match',   s:'+2', c:'in', n:'treated as the same shot'};
+  if(d<=20) return {k:'weak',    s:'0',  c:'re', n:'paired without penalty — but still reported as a replace'};
+  return           {k:'mismatch',s:'-1', c:'de', n:'a different picture'};
+}
+/* popcount of the XOR of two equal-length hex strings — the real Hamming
+   distance the pipeline computes, just written for four bits at a time. */
+var POP=[0,1,1,2,1,2,2,3,1,2,2,3,2,3,3,4];
+function hamHex(a,b){ var d=0; for(var i=0;i<a.length;i++) d+=POP[parseInt(a[i],16)^parseInt(b[i],16)]; return d }
+
+/* ───────────────────────── one Needleman-Wunsch, used by three boards
+   `sim(i,j)` is the only thing that changes between alphabets. */
+function nw(n,m,sim,gap){
+  var H=[],P=[],i,j;
+  for(i=0;i<=n;i++){ H.push(new Array(m+1).fill(0)); P.push(new Array(m+1).fill(null)) }
+  for(i=0;i<=n;i++) H[i][0]=i*gap;
+  for(j=0;j<=m;j++) H[0][j]=j*gap;
+  for(i=1;i<=n;i++) for(j=1;j<=m;j++){
+    var d=H[i-1][j-1]+sim(i-1,j-1), u=H[i-1][j]+gap, l=H[i][j-1]+gap, best=Math.max(d,u,l);
+    H[i][j]=best; P[i][j]= best===d?'d' : best===u?'u' : 'l';
+  }
+  var ops=[]; i=n; j=m;
+  while(i>0||j>0){
+    if(i>0&&j>0&&P[i][j]==='d'){ ops.unshift({t:'d',i:i-1,j:j-1}); i--; j-- }
+    else if(i>0&&(j===0||P[i][j]==='u')){ ops.unshift({t:'u',i:i-1,j:-1}); i-- }
+    else { ops.unshift({t:'l',i:-1,j:j-1}); j-- }
+  }
+  return {H:H,P:P,ops:ops,score:H[n][m]};
+}
+
+/* ═══════════════════════════════════════════════════════════ widgets */
+var FX={};
+
+/* ── two files land on a desk ─────────────────────────────────────── */
+FX.versions=function(el){
+  var h=el.querySelector('[data-host]'), shown=false;
+  var rows=[
+    {k:'filename', a:'TITLE_MASTER_v3_FINAL.mxf', b:'TITLE_TV_DELIVERY.mxf',
+     w:'Hand-typed. "FINAL" has been final four times.'},
+    {k:'runtime',  a:'02:08:31', b:'02:04:02', w:'4 m 29 s shorter. One scene, or twelve trims?'},
+    {k:'container',a:'MXF OP1a · XDCAM', b:'MXF OP1a · XDCAM', w:'Identical wrappers say nothing about the edit.'},
+    {k:'range',    a:'SDR · BT.709', b:'HDR10 · PQ · BT.2020', w:'A real re-grade, or only a re-wrap?'},
+    {k:'audio',    a:'6 × mono', b:'6 × mono', w:'Same count. Same content? Unknown.'},
+    {k:'sidecar',  a:'"theatrical"', b:'"broadcast, minor trims"', w:'Written by a human under deadline.'}
+  ];
+  h.innerHTML='<div data-grid style="display:grid;grid-template-columns:96px 1fr 1fr;gap:0 26px"></div>'+
+    '<div class="row mid" style="gap:18px;margin-top:26px">'+
+      '<button class="btn p" data-go>What do we actually know?</button>'+
+      '<span class="small" data-note></span></div>';
+  var g=h.querySelector('[data-grid]');
+  function paint(){
+    g.innerHTML='<div></div>'+
+      '<div class="small mono" style="letter-spacing:.16em;padding-bottom:10px">VERSION A</div>'+
+      '<div class="small mono" style="letter-spacing:.16em;padding-bottom:10px">VERSION B</div>'+
+      rows.map(function(r){
+        var st=shown?'color:var(--fade);text-decoration:line-through':'color:var(--ink)';
+        return '<div class="small mono" style="padding:10px 0;border-top:1px solid var(--line)">'+r.k+'</div>'+
+          '<div class="mono" style="font-size:14.5px;padding:10px 0;border-top:1px solid var(--line);'+st+'">'+r.a+'</div>'+
+          '<div class="mono" style="font-size:14.5px;padding:10px 0;border-top:1px solid var(--line);'+st+'">'+r.b+'</div>'+
+          (shown?'<div></div><div class="small" style="grid-column:2/4;padding:0 0 10px;color:var(--rep)">'+r.w+'</div>':'');
+      }).join('');
+    h.querySelector('[data-note]').innerHTML = shown
+      ? '<b class="ink">Nothing here is evidence.</b> Every field is hand-written, or true of both files and therefore silent about the edit.'
+      : 'Six fields. Every one of them arrived with the file.';
+    h.querySelector('[data-go]').textContent = shown?'Hide':'What do we actually know?';
+  }
+  h.querySelector('[data-go]').onclick=function(){ shown=!shown; paint() };
+  paint();
+};
+
+/* ── why the cheap answers fail ───────────────────────────────────── */
+var NAIVE={
+  hash:{l:'Byte hash', a:['','','','','',''], b:['','','','','',''],
+    v:'<b class="ink">"Completely different."</b> True, and useless — a re-encode of the identical edit gives the same answer.'},
+  runtime:{l:'Runtime', a:['','','','','',''], b:['','','','','',''],
+    v:'<b class="ink">"B is 4 m 29 s shorter."</b> Where? How many places? A scene <em>replaced</em> by one of equal length is invisible.'},
+  frame:{l:'Frame n vs frame n', a:['on','on','off','off','off','off'], b:['on','on','off','off','off','off'],
+    v:'<b class="ink">Correct until the first cut, then wrong for the rest of the film.</b> One edit at 00:12:04 reports as a two-hour difference.'},
+  window:{l:'Sliding window', a:['on','on','off','on','on','off'], b:['on','on','on','on','off','off'],
+    v:'<b class="ink">Re-syncs past the first edit, then breaks on the second.</b> It fails <em>silently</em> — a clean-looking result that is wrong.'},
+  align:{l:'Global alignment', a:['eq','eq','del','eq','rep','gap','eq'], b:['eq','eq','gap','eq','rep','ins','eq'],
+    v:'<b class="ink">Every edit located, on both timelines, with everything after it still aligned.</b> Gaps absorb the drift.'}
+};
+FX.naive=function(el){
+  var h=el.querySelector('[data-host]'), cur='hash', keys=Object.keys(NAIVE);
+  h.innerHTML='<div class="seg" data-seg>'+keys.map(function(k,i){
+      return '<button data-k="'+k+'"'+(i===0?' class="sel"':'')+'>'+NAIVE[k].l+'</button>' }).join('')+'</div>'+
+    '<div style="margin-top:30px;display:flex;flex-direction:column;gap:9px" data-trk></div>'+
+    '<div class="key" style="margin-top:18px" data-key></div>'+
+    '<p class="note" style="margin-top:28px" data-v></p>';
+  var tk=h.querySelector('[data-trk]'), kk=h.querySelector('[data-key]'), vv=h.querySelector('[data-v]');
+  function paint(){
+    var m=NAIVE[cur];
+    function cells(arr,p){ return arr.map(function(c,i){ return {cls:c, t:c==='gap'?'':p+(i+1)} }) }
+    tk.innerHTML=track('A',cells(m.a,'a'))+track('B',cells(m.b,'b'));
+    kk.innerHTML = cur==='align'
+      ? '<span><i class="dot" style="background:rgba(237,238,240,.18)"></i>equal</span>'+
+        '<span><i class="dot" style="background:var(--del)"></i>in A only — cut</span>'+
+        '<span><i class="dot" style="background:var(--ins)"></i>in B only — added</span>'+
+        '<span><i class="dot" style="background:var(--rep)"></i>paired, picture differs</span>'
+      : (cur==='frame'||cur==='window')
+      ? '<span><i class="dot" style="background:rgba(237,238,240,.3)"></i>reported as matching</span>'+
+        '<span><i class="dot" style="background:transparent;border:1px solid var(--line2)"></i>reported as different</span>'
+      : '<span>This strategy never looks inside the timeline at all.</span>';
+    vv.innerHTML=m.v;
+  }
+  h.querySelector('[data-seg]').addEventListener('click',function(e){
+    var b=e.target.closest('button'); if(!b) return; cur=b.dataset.k;
+    [].slice.call(this.children).forEach(function(x){x.classList.toggle('sel',x===b)}); paint();
+  });
+  paint();
+};
+
+/* ── DNA and film, side by side ───────────────────────────────────────
+   The point of this board: the two modes call the same nw() with the same
+   gap penalty and the same +2/-1. Only `sim` differs. */
+var FILM={
+  A:[{n:'s1',h:'f0e1d2c3b4a59687'},{n:'s2',h:'0123456789abcdef'},{n:'s3',h:'ffffffff00000000'},
+     {n:'s4',h:'aaaaaaaa55555555'},{n:'s5',h:'1234123443214321'},{n:'s6',h:'deadbeefcafebabe'},
+     {n:'s7',h:'00ff00ff00ff00ff'}],
+  B:[{n:'s1',h:'f0e1d2c3b4a59685'},{n:'s2',h:'0123456789abcdef'},{n:'s3',h:'aaaaaaaa55555551'},
+     {n:'s4',h:'edcbed3443214321'},{n:'s5',h:'5a5a5a5aa5a5a5a5'},{n:'s6',h:'deadbeefcafebabf'},
+     {n:'s7',h:'00ff00ff00ff00ff'}]
+};
+FX.dna=function(el){
+  var h=el.querySelector('[data-host]'), mode='dna';
+  h.innerHTML=
+    '<div class="row mid" style="gap:20px">'+
+      '<div class="seg" data-seg><button data-m="dna" class="sel">DNA</button><button data-m="film">Film</button></div>'+
+      '<span class="small" data-hint></span></div>'+
+    '<div style="margin-top:24px" data-inputs></div>'+
+    '<div style="margin-top:20px;display:flex;flex-direction:column;gap:8px" data-trk></div>'+
+    '<div class="key" style="margin-top:16px" data-key></div>'+
+    '<div class="row" style="gap:44px;margin-top:26px">'+
+      '<div class="grow"><dl class="kv" data-kv></dl></div>'+
+      '<div class="grow"><p class="note" style="font-size:15.5px" data-v></p></div>'+
+    '</div>';
+  var ins=h.querySelector('[data-inputs]'), tk=h.querySelector('[data-trk]'),
+      kk=h.querySelector('[data-key]'), kv=h.querySelector('[data-kv]'), vv=h.querySelector('[data-v]');
+
+  function run(){
+    if(mode==='dna'){
+      var a=(h.querySelector('[data-a]').value.toUpperCase().replace(/[^ACGT]/g,'')||'A').slice(0,26),
+          b=(h.querySelector('[data-b]').value.toUpperCase().replace(/[^ACGT]/g,'')||'A').slice(0,26);
+      /* a base matches itself: +2, anything else -1 */
+      var r=nw(a.length,b.length,function(i,j){ return a[i]===b[j]?2:-1 },-1);
+      var ca=[],cb=[],mt=0,gp=0,sb=0;
+      r.ops.forEach(function(o){
+        if(o.t==='d'){ var same=a[o.i]===b[o.j];
+          if(same) mt++; else sb++;
+          ca.push({cls:same?'eq':'rep',t:a[o.i]}); cb.push({cls:same?'eq':'rep',t:b[o.j]}) }
+        else if(o.t==='u'){ gp++; ca.push({cls:'del',t:a[o.i]}); cb.push({cls:'gap',t:'–'}) }
+        else { gp++; ca.push({cls:'gap',t:'–'}); cb.push({cls:'ins',t:b[o.j]}) }
+      });
+      tk.innerHTML=track('Reference',ca,true)+track('Variant',cb,true);
+      kk.innerHTML='<span><i class="dot" style="background:rgba(237,238,240,.18)"></i>identical base</span>'+
+        '<span><i class="dot" style="background:var(--rep)"></i>substitution</span>'+
+        '<span><i class="dot" style="background:var(--del)"></i>deleted</span>'+
+        '<span><i class="dot" style="background:var(--ins)"></i>inserted</span>';
+      kv.innerHTML='<dt>Letter</dt><dd>a base — A C G T</dd>'+
+        '<dt>Same?</dt><dd class="mono ink">a[i] === b[j]</dd>'+
+        '<dt>Score</dt><dd class="mono">+2 match · −1 substitution · −1 gap</dd>'+
+        '<dt>Result</dt><dd><span class="ink">'+mt+'</span> matched · <span class="re">'+sb+
+          '</span> substituted · <span class="ink">'+gp+'</span> gaps · total <span class="mono ink">'+r.score+'</span></dd>';
+      vv.innerHTML='Two sequences from a common ancestor, diverged by insertion, deletion and '+
+        'substitution. <b>Edit the bases above</b> — the alignment recomputes on every keystroke.';
+      h.querySelector('[data-hint]').textContent='Needleman-Wunsch, 1970 — written for exactly this';
+    } else {
+      var A=FILM.A, B=FILM.B;
+      /* the only change: two shots are "the same" when their hashes are
+         within the match band, which is the pipeline's own rule */
+      var r2=nw(A.length,B.length,function(i,j){ var d=hamHex(A[i].h,B[j].h);
+            return d<=10?2 : d<=20?0 : -1 },-1);
+      var xa=[],xb=[],eq=0,rp=0,dl=0,is=0;
+      r2.ops.forEach(function(o){
+        if(o.t==='d'){ var d=hamHex(A[o.i].h,B[o.j].h), same=d<=10;
+          if(same) eq++; else rp++;
+          xa.push({cls:same?'eq':'rep',t:A[o.i].n}); xb.push({cls:same?'eq':'rep',t:B[o.j].n}) }
+        else if(o.t==='u'){ dl++; xa.push({cls:'del',t:A[o.i].n}); xb.push({cls:'gap',t:'–'}) }
+        else { is++; xa.push({cls:'gap',t:'–'}); xb.push({cls:'ins',t:B[o.j].n}) }
+      });
+      tk.innerHTML=track('Version A',xa,true)+track('Version B',xb,true);
+      kk.innerHTML='<span><i class="dot" style="background:rgba(237,238,240,.18)"></i>same shot</span>'+
+        '<span><i class="dot" style="background:var(--rep)"></i>replaced</span>'+
+        '<span><i class="dot" style="background:var(--del)"></i>cut</span>'+
+        '<span><i class="dot" style="background:var(--ins)"></i>added</span>';
+      kv.innerHTML='<dt>Letter</dt><dd>a shot — the span between two cuts</dd>'+
+        '<dt>Same?</dt><dd class="mono ink">hamming(a[i], b[j]) &lt;= 10</dd>'+
+        '<dt>Score</dt><dd class="mono">+2 match · 0 weak · −1 mismatch · −1 gap</dd>'+
+        '<dt>Result</dt><dd><span class="ink">'+eq+'</span> equal · <span class="re">'+rp+
+          '</span> replaced · <span class="de">'+dl+'</span> cut · <span class="in">'+is+
+          '</span> added · total <span class="mono ink">'+r2.score+'</span></dd>';
+      vv.innerHTML='Two cuts of one title, diverged by the same three operations. <b>Identical code</b> — '+
+        'the same <span class="mono">nw()</span>, the same gap penalty. Only the definition of '+
+        '<span class="mono">Same?</span> changed.';
+      h.querySelector('[data-hint]').textContent='real 64-bit hashes, real Hamming distance';
+    }
+  }
+  function paint(){
+    ins.innerHTML = mode==='dna'
+      ? '<div class="row" style="gap:20px">'+
+          '<div class="grow"><p class="small" style="margin-bottom:8px">Reference</p>'+
+            '<input type="text" data-a value="ACGTTGCATGT"></div>'+
+          '<div class="grow"><p class="small" style="margin-bottom:8px">Variant</p>'+
+            '<input type="text" data-b value="ACGTGCCTGTA"></div></div>'
+      : '<div class="pre" style="font-size:14px;color:var(--fade)">A   s1 s2 s3 s4 s5 s6 s7      seven shots, each a 64-bit perceptual hash\n'+
+        'B   s1 s2 s3 s4 s5 s6 s7      seven shots from the broadcast cut</div>';
+    if(mode==='dna'){
+      h.querySelector('[data-a]').addEventListener('input',run);
+      h.querySelector('[data-b]').addEventListener('input',run);
+    }
+    run();
+  }
+  h.querySelector('[data-seg]').addEventListener('click',function(e){
+    var b=e.target.closest('button'); if(!b) return; mode=b.dataset.m;
+    [].slice.call(this.children).forEach(function(x){x.classList.toggle('sel',x===b)}); paint();
+  });
+  paint();
+};
+
+/* ── the perceptual hash lab ──────────────────────────────────────── */
+var TR=[
+  {n:'Full negate',d:62,s:'Inverting every pixel is the largest change the hash can express.'},
+  {n:'Horizontal flip',d:28,s:'Structure preserved but mirrored — a clean, reliable mismatch.'},
+  {n:'Punch-in 30 %',d:28,s:'A reframe this aggressive reads as a different shot, correctly.'},
+  {n:'Entirely different footage',d:28,s:'The working definition of a replace — and it scores the same as a 30 % punch-in.'},
+  {n:'Punch-in 15 %',d:14,s:'The weak band: probably the same shot, not certainly.'},
+  {n:'Lower-third graphic',d:14,s:'A caption changes the low-frequency structure, but only a little.'},
+  {n:'HDR vs SDR, untonemapped',d:12,s:'The bug from section 6. Weak band on identical footage — every shot fakes a replace.'},
+  {n:'HDR vs SDR, tone-mapped',d:6,s:'The same pair after the fix, back inside the match band.'},
+  {n:'720p vs 360p',d:0,s:'Resolution invariance, working exactly as intended.'},
+  {n:'Colour grade / hue shift',d:0,s:'Invisible. phash is greyscale — a pure colour change cannot be seen.'},
+  {n:'Saturation / greyscale',d:0,s:'Invisible. The single most important limitation of this tool.'},
+  {n:'Gaussian blur',d:0,s:'Invisible. The DCT keeps only low frequencies; blur removes high ones.'}
+];
+FX.phash=function(el){
+  var h=el.querySelector('[data-host]'), cur=1;
+  h.innerHTML='<div class="row" style="gap:44px">'+
+    '<div style="width:390px;flex:none;display:flex;flex-direction:column;gap:3px" data-list></div>'+
+    '<div class="grow">'+
+      '<div style="display:flex;align-items:baseline;gap:12px">'+
+        '<span class="mono" data-big style="font-size:56px;font-weight:500;letter-spacing:-.04em"></span>'+
+        '<span class="small mono">/ 64 bits differ</span></div>'+
+      '<div style="position:relative;margin-top:34px">'+
+        '<div class="band"><div class="z" style="width:17.2%">MATCH 0–10</div>'+
+        '<div class="z" style="width:15.6%">WEAK 11–20</div>'+
+        '<div class="z" style="flex:1">MISMATCH 21–64</div></div>'+
+        '<div class="needle" data-needle style="left:0"></div></div>'+
+      '<p class="small" data-verdict style="margin-top:26px;min-height:44px"></p>'+
+      '<p class="note" style="margin-top:22px;font-size:15px">The last three rows are a real limitation, '+
+      'stated plainly: <b>a pure colour change is not detectable by this signal.</b> Closing that gap is '+
+      'the first item on the roadmap.</p>'+
+    '</div></div>';
+  var list=h.querySelector('[data-list]'), big=h.querySelector('[data-big]'),
+      nd=h.querySelector('[data-needle]'), vd=h.querySelector('[data-verdict]');
+  list.innerHTML=TR.map(function(t,i){
+    return '<button class="opt'+(i===cur?' sel':'')+'" data-i="'+i+'"><span>'+t.n+'</span>'+
+      '<span class="v">'+t.d+'</span></button>' }).join('');
+  function paint(){
+    var t=TR[cur], b=band(t.d);
+    big.textContent=t.d; big.className='mono '+b.c;
+    nd.style.left=(t.d/64*100)+'%'; nd.dataset.v=t.d;
+    vd.innerHTML='<b class="'+b.c+'" style="text-transform:uppercase;letter-spacing:.1em;font-size:12.5px">'+b.k+
+      '</b> <span class="mono">scores '+b.s+'</span> · '+b.n+'<br><span class="ink">'+t.s+'</span>';
+    [].slice.call(list.children).forEach(function(x,i){x.classList.toggle('sel',i===cur)});
+  }
+  list.addEventListener('click',function(e){ var b=e.target.closest('button'); if(!b) return;
+    cur=+b.dataset.i; paint() });
+  paint();
+};
+
+/* ── the scoring bands ────────────────────────────────────────────── */
+FX.bands=function(el){
+  var h=el.querySelector('[data-host]');
+  h.innerHTML='<div class="row mid" style="gap:56px">'+
+    '<div class="grow">'+
+      '<p class="small" style="margin-bottom:22px">Hamming distance between two shot hashes</p>'+
+      '<div style="position:relative;margin-bottom:34px">'+
+        '<div class="band"><div class="z" style="width:17.2%">MATCH</div>'+
+        '<div class="z" style="width:15.6%">WEAK</div><div class="z" style="flex:1">MISMATCH</div></div>'+
+        '<div class="needle" data-needle style="left:0"></div></div>'+
+      '<input type="range" min="0" max="64" value="7" data-r>'+
+      '<div class="row" style="justify-content:space-between;margin-top:10px">'+
+        '<span class="small mono">0 — identical</span><span class="small mono">64 — inverted</span></div>'+
+    '</div>'+
+    '<div style="width:300px;flex:none">'+
+      '<div class="mono" data-score style="font-size:72px;font-weight:500;letter-spacing:-.05em;line-height:1"></div>'+
+      '<p class="small" data-k style="margin-top:10px;letter-spacing:.18em;text-transform:uppercase"></p>'+
+      '<p class="small" data-note style="margin-top:14px;min-height:56px;color:var(--mut)"></p></div>'+
+    '</div>'+
+    '<p class="note" style="margin-top:34px">The middle band does one job, precisely: it stops a near-miss '+
+    'from <b>shredding the timeline</b>. Scoring 0 rather than −1 means the alignment still pairs the two '+
+    'shots — but the pair is <b>still reported as a replace</b>, because only the match band means '+
+    '"same shot". And because a gap costs −1, pairing two clearly different shots (−1) always beats '+
+    'opening two gaps (−2). That is where a genuine replace comes from.</p>';
+  var r=h.querySelector('[data-r]'), nd=h.querySelector('[data-needle]'),
+      sc=h.querySelector('[data-score]'), kk=h.querySelector('[data-k]'), nt=h.querySelector('[data-note]');
+  function paint(){
+    var d=+r.value, b=band(d);
+    nd.style.left=(d/64*100)+'%'; nd.dataset.v=d;
+    sc.textContent=b.s; sc.className='mono '+b.c;
+    kk.textContent=b.k; kk.className='small '+b.c;
+    nt.innerHTML=b.n.charAt(0).toUpperCase()+b.n.slice(1)+'.';
+  }
+  r.addEventListener('input',paint); paint();
+};
+
+/* ── the matrix, cell by cell ─────────────────────────────────────── */
+var NWD={ A:['a1','a2','a3','a4','a5','a6'], B:['b1','b2','b3','b4','b5','b6'],
+  D:[[2,30,29,33,31,30],[31,1,28,30,32,29],[29,27,26,31,30,33],
+     [30,29,3,28,31,30],[32,31,29,31,30,28],[28,30,31,29,27,0]] };
+FX.align=function(el){
+  var h=el.querySelector('[data-host]'), n=6, m=6, H, P, filled, traced;
+  function sc(d){ return d<=10?2 : d<=20?0 : -1 }
+  function init(){ H=[];P=[];filled=0;traced=null;
+    for(var i=0;i<=n;i++){H.push(new Array(m+1).fill(null));P.push(new Array(m+1).fill(null))}
+    for(var k=0;k<=n;k++) H[k][0]=-k;
+    for(var j=0;j<=m;j++) H[0][j]=-j; }
+  function at(k){ return {i:Math.floor(k/m)+1, j:k%m+1} }
+  function fill1(){ if(filled>=n*m) return false;
+    var c=at(filled), i=c.i, j=c.j;
+    var d=H[i-1][j-1]+sc(NWD.D[i-1][j-1]), u=H[i-1][j]-1, l=H[i][j-1]-1, best=Math.max(d,u,l);
+    H[i][j]=best; P[i][j]= best===d?'d' : best===u?'u' : 'l'; filled++; return true }
+  function trace(){ var i=n,j=m,ops=[];
+    while(i>0||j>0){
+      if(i>0&&j>0&&P[i][j]==='d'){ var d=NWD.D[i-1][j-1];
+        /* align.py: `equal` only inside the match band; a weak pair is a replace */
+        ops.unshift({t:d<=10?'eq':'rep',i:i,j:j}); i--; j-- }
+      else if(i>0&&(j===0||P[i][j]==='u')){ ops.unshift({t:'del',i:i,j:0}); i-- }
+      else { ops.unshift({t:'ins',i:0,j:j}); j-- } }
+    return ops }
+
+  h.innerHTML='<div class="row" style="gap:40px">'+
+    '<div style="flex:none"><table class="mx" data-mx></table></div>'+
+    '<div class="grow">'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:22px">'+
+        '<button class="btn p" data-step>Fill one cell</button>'+
+        '<button class="btn" data-all>Fill the matrix</button>'+
+        '<button class="btn" data-trace>Trace back</button>'+
+        '<button class="btn" data-rs>Reset</button></div>'+
+      '<div data-expl style="min-height:120px"></div>'+
+      '<div style="margin-top:24px" data-res></div>'+
+    '</div></div>';
+  var mx=h.querySelector('[data-mx]'), expl=h.querySelector('[data-expl]'), res=h.querySelector('[data-res]');
+
+  function paintMx(){
+    var cur = filled<n*m ? at(filled) : null, path={};
+    if(traced){ var i=n,j=m; while(i>0||j>0){ path[i+','+j]=1;
+        if(i>0&&j>0&&P[i][j]==='d'){i--;j--} else if(i>0&&(j===0||P[i][j]==='u')){i--} else {j--} }
+      path['0,0']=1 }
+    var html='<tr><th></th><th></th>'+NWD.B.map(function(b){return '<th>'+b+'</th>'}).join('')+'</tr>';
+    for(var i2=0;i2<=n;i2++){ html+='<tr><th>'+(i2===0?'':NWD.A[i2-1])+'</th>';
+      for(var j2=0;j2<=m;j2++){ var v=H[i2][j2], c=[];
+        if(i2===0||j2===0) c.push('done','zero'); else if(v!==null) c.push('done');
+        if(cur&&cur.i===i2&&cur.j===j2) c.push('cur');
+        if(cur&&!traced&&((i2===cur.i-1&&j2===cur.j-1)||(i2===cur.i-1&&j2===cur.j)||(i2===cur.i&&j2===cur.j-1))) c.push('src');
+        if(path[i2+','+j2]) c.push('path');
+        html+='<td class="'+c.join(' ')+'">'+(v===null?'':v)+'</td>' }
+      html+='</tr>' }
+    mx.innerHTML=html;
+  }
+  function paintExpl(){
+    if(traced){ expl.innerHTML='<p class="note" style="font-size:15.5px"><b class="in">Traceback complete.</b> '+
+      'Walking the pointer matrix from the bottom-right corner back to the origin gives the alignment below, '+
+      'total score <span class="mono ink">'+H[n][m]+'</span>. No other alignment of these two sequences scores '+
+      'higher — that is what <b>global</b> and <b>optimal</b> mean here.</p>'; return }
+    if(filled===0){ expl.innerHTML='<p class="small">Row 0 and column 0 are seeded with cumulative gap '+
+      'penalties: aligning the first <span class="mono">k</span> shots against nothing costs '+
+      '<span class="mono">k × −1</span>. Every interior cell then takes the best of three predecessors.</p>'; return }
+    var c=at(filled-1), i=c.i, j=c.j, d=NWD.D[i-1][j-1], b=band(d), w=P[i][j];
+    var dg=H[i-1][j-1]+sc(d), up=H[i-1][j]-1, lf=H[i][j-1]-1;
+    expl.innerHTML='<p class="small" style="margin-bottom:12px"><span class="mono ink">H['+i+']['+j+']</span> — '+
+      'pairing <span class="mono">'+NWD.A[i-1]+'</span> with <span class="mono">'+NWD.B[j-1]+'</span>, distance '+
+      '<span class="mono '+b.c+'">'+d+'/64</span> ('+b.k+', scores '+b.s+')</p>'+
+      '<div class="pre" style="font-size:14.5px;line-height:1.75">'+
+      '<span class="'+(w==='d'?'in':'fade')+'">diag  '+H[i-1][j-1]+' + ('+b.s+')  = '+dg+(w==='d'?'   ← pair them':'')+'</span>\n'+
+      '<span class="'+(w==='u'?'in':'fade')+'">up    '+H[i-1][j]+' + (-1) = '+up+(w==='u'?'   ← '+NWD.A[i-1]+' deleted':'')+'</span>\n'+
+      '<span class="'+(w==='l'?'in':'fade')+'">left  '+H[i][j-1]+' + (-1) = '+lf+(w==='l'?'   ← '+NWD.B[j-1]+' inserted':'')+'</span></div>';
+  }
+  function paintRes(){
+    if(!traced){ res.innerHTML=''; return }
+    var ca=[],cb=[],c={eq:0,del:0,ins:0,rep:0};
+    traced.forEach(function(o){ c[o.t]++;
+      if(o.t==='del'){ ca.push({cls:'del',t:NWD.A[o.i-1]}); cb.push({cls:'gap',t:'–'}) }
+      else if(o.t==='ins'){ ca.push({cls:'gap',t:'–'}); cb.push({cls:'ins',t:NWD.B[o.j-1]}) }
+      else { ca.push({cls:o.t,t:NWD.A[o.i-1]}); cb.push({cls:o.t,t:NWD.B[o.j-1]}) } });
+    res.innerHTML='<div style="display:flex;flex-direction:column;gap:7px">'+
+      track('A',ca,true)+track('B',cb,true)+'</div>'+
+      '<div class="key" style="margin-top:14px">'+
+      '<span><i class="dot" style="background:rgba(237,238,240,.18)"></i>'+c.eq+' equal</span>'+
+      '<span><i class="dot" style="background:var(--del)"></i>'+c.del+' delete</span>'+
+      '<span><i class="dot" style="background:var(--ins)"></i>'+c.ins+' insert</span>'+
+      '<span><i class="dot" style="background:var(--rep)"></i>'+c.rep+' replace</span>'+
+      '<span>runs of one type then merge into timecoded regions</span></div>';
+  }
+  function all(){ paintMx(); paintExpl(); paintRes();
+    h.querySelector('[data-trace]').disabled=filled<n*m||!!traced;
+    h.querySelector('[data-step]').disabled=filled>=n*m;
+    h.querySelector('[data-all]').disabled=filled>=n*m }
+  h.querySelector('[data-step]').onclick=function(){fill1();all()};
+  h.querySelector('[data-all]').onclick=function(){while(fill1()){}all()};
+  h.querySelector('[data-trace]').onclick=function(){traced=trace();all()};
+  h.querySelector('[data-rs]').onclick=function(){init();all()};
+  init(); all();
+};
+
+/* ── the audio pass ───────────────────────────────────────────────── */
+var ASH=[{n:'s1',p:1,a:3},{n:'s2',p:0,a:2},{n:'s3',p:2,a:34},
+         {n:'s4',p:1,a:31},{n:'s5',p:0,a:4},{n:'s6',p:3,a:1}];
+FX.audio=function(el){
+  var h=el.querySelector('[data-host]'), on=true;
+  h.innerHTML='<div class="row mid" style="gap:20px">'+
+      '<span class="small">Audio signal</span>'+
+      '<div class="seg" data-seg><button data-s="1" class="sel">On</button><button data-s="0">Off</button></div>'+
+      '<span class="small" data-hint></span></div>'+
+    '<div style="margin-top:30px;display:grid;grid-template-columns:74px repeat(6,1fr);gap:11px 10px;align-items:center" data-grid></div>'+
+    '<p class="note" style="margin-top:32px" data-v></p>';
+  var g=h.querySelector('[data-grid]'), vv=h.querySelector('[data-v]');
+  function paint(){
+    var r='<div class="small mono">shot</div>'+ASH.map(function(s){
+      return '<div class="mono" style="font-size:14px;text-align:center;color:var(--mut)">'+s.n+'</div>'}).join('');
+    r+='<div class="small mono">picture</div>'+ASH.map(function(s){
+      return '<div class="mono in" style="font-size:14px;text-align:center">'+s.p+'/64</div>'}).join('');
+    r+='<div class="small mono">audio</div>'+ASH.map(function(s){
+      var hot=on&&s.a>16;
+      return '<div class="mono" style="font-size:14px;text-align:center;color:'+
+        (on?(hot?'var(--aud)':'var(--fade)'):'var(--line2)')+'">'+(on?s.a+'/64':'—')+'</div>'}).join('');
+    r+='<div class="small mono">result</div>'+ASH.map(function(s){
+      var hot=on&&s.a>16;
+      return '<div class="c '+(hot?'aud':'eq')+'" style="height:32px;font-size:12px;border-radius:4px;'+
+        'display:grid;place-items:center;font-family:var(--mono);'+
+        (hot?'background:rgba(136,120,192,.17);border:1px solid rgba(136,120,192,.5);color:var(--aud)'
+            :'background:rgba(237,238,240,.05);color:var(--mut)')+'">'+(hot?'audio':'equal')+'</div>'}).join('');
+    g.innerHTML=r;
+    var n=ASH.filter(function(s){return s.a>16}).length;
+    vv.innerHTML = on
+      ? '<b class="au">'+n+' shots retagged audio_changed.</b> The picture is untouched — every distance on '+
+        'the picture row is inside the match band. Only the second signal can see this: a localised dub, a '+
+        'replaced music cue, a censored line.'
+      : '<b class="ink">Zero regions. "These versions are identical."</b> Confidently wrong — and this is one '+
+        'of the most common version differences that exists.';
+    h.querySelector('[data-hint]').textContent = on
+      ? 'a paired shot with audio distance above 16/64 is retagged'
+      : 'picture only — exactly what the scoring function sees';
+  }
+  h.querySelector('[data-seg]').addEventListener('click',function(e){
+    var b=e.target.closest('button'); if(!b) return; on=b.dataset.s==='1';
+    [].slice.call(this.children).forEach(function(x){x.classList.toggle('sel',x===b)}); paint() });
+  paint();
+};
+
+/* ── the pipeline ─────────────────────────────────────────────────── */
+var ST=[
+  {id:'probe',l:'Probe',lane:'a',t:'Read the source with ffprobe',
+   d:'Codec, resolution, frame rate, colour primaries, transfer function, audio track count. Deliberately reads the <b>source</b>, never the proxy — the proxy is 8-bit BT.709 by definition and would report every HDR master as SDR.'},
+  {id:'proxy',l:'Proxy 480p',lane:'a',t:'Build one normalised file',
+   d:'480p H.264, videotoolbox on Apple silicon with a libx264 fallback. HDR is tone-mapped to BT.709 here; every audio track is merged with <span class="mono">amerge</span>. Cached, and keyed on <span class="mono">PROXY_PIPELINE_VERSION</span> so a changed transform invalidates old proxies.'},
+  {id:'shots',l:'Shot detection',lane:'a',t:'Find the cuts',
+   d:'PySceneDetect <span class="mono">ContentDetector</span> at threshold 27.0, over the proxy. Output: shot boundaries in seconds — where the letters of our string begin and end.'},
+  {id:'hash',l:'Fingerprint',lane:'a',t:'Two 64-bit hashes per shot',
+   d:'Picture: <span class="mono">imagehash.phash</span> of the shot’s middle frame — DCT of a greyscale 32×32, low-frequency 8×8 corner, median-thresholded. Audio: a mel-spectrogram at 22 050 Hz, 64 bands pooled to 8×8, thresholded the same way.'},
+  {id:'align',l:'Align',lane:'m',t:'Needleman-Wunsch',
+   d:'The judged component. Global alignment over the two hash sequences, scored +2 / 0 / −1 with a linear −1 gap, vectorised per row with <span class="mono">np.maximum.accumulate</span>. Then the audio retagging pass, then runs of one type merge into regions.'},
+  {id:'thumbs',l:'Thumbnails',lane:'m',t:'Both sides of every region',
+   d:'Frames pulled from each proxy at the region boundaries, base64-inlined into a <span class="mono">.thumbs.json</span> sidecar so <span class="mono">report.json</span> stays small and diffable.'},
+  {id:'expl',l:'Descriptions',lane:'m',t:'Optional · off by default',
+   d:'A local vision model over Ollama turns each region’s facts into one sentence. Never asked to compare two frame sets — the comparison is assembled in Python from values already computed. Unreachable or slow, and the region keeps its factual summary.'},
+  {id:'report',l:'Report',lane:'m',t:'Two artefacts',
+   d:'<span class="mono">report.json</span> is the machine contract: stable field names, no embedded images. <span class="mono">report.html</span> is fully self-contained — thumbnails inlined, zero external requests, mailable as one file.'}
+];
+FX.pipeline=function(el){
+  var h=el.querySelector('[data-host]'), cur='align';
+  function lane(k){ return ST.filter(function(s){return s.lane===k}).map(function(s,i,a){
+      return '<button class="opt'+(s.id===cur?' sel':'')+(s.id==='expl'?' off':'')+'" data-id="'+s.id+'" '+
+        'style="justify-content:center">'+s.l+'</button>'+
+        (i<a.length-1?'<span class="small" style="flex:none">→</span>':'') }).join('') }
+  h.innerHTML=
+    '<div style="display:grid;grid-template-columns:82px 1fr;gap:12px 18px;align-items:center">'+
+      '<span class="small mono">VERSION A</span><div style="display:flex;gap:9px;align-items:center" data-la></div>'+
+      '<span class="small mono">VERSION B</span><div style="display:flex;gap:9px;align-items:center" data-lb></div>'+
+      '<div style="grid-column:1/3;height:1px;background:var(--line);margin:4px 0"></div>'+
+      '<span class="small mono">MERGE</span><div style="display:flex;gap:9px;align-items:center" data-lm></div>'+
+    '</div>'+
+    '<div style="margin-top:30px;min-height:130px"><h3 data-t></h3><p class="small" data-d style="margin-top:11px;max-width:92ch"></p></div>'+
+    '<p class="note" style="margin-top:22px;font-size:15px">The two lanes share nothing until alignment, so '+
+    'they run on two workers at once. A fingerprint computed for a file is cached and reused the next time '+
+    'that file is compared against <em>anything</em>.</p>';
+  h.querySelector('[data-la]').innerHTML=lane('a');
+  h.querySelector('[data-lb]').innerHTML=lane('a');
+  h.querySelector('[data-lm]').innerHTML=lane('m');
+  function paint(){
+    var s=ST.filter(function(x){return x.id===cur})[0];
+    h.querySelector('[data-t]').textContent=s.l+' — '+s.t;
+    h.querySelector('[data-d]').innerHTML=s.d;
+    [].slice.call(h.querySelectorAll('.opt')).forEach(function(b){b.classList.toggle('sel',b.dataset.id===cur)});
+  }
+  h.addEventListener('click',function(e){ var b=e.target.closest('.opt'); if(!b) return; cur=b.dataset.id; paint() });
+  paint();
+};
+
+/* ── the region output ────────────────────────────────────────────── */
+var RG=[
+  {t:'delete',w:9,as:724,ae:761,bs:724,be:724,n:4,
+   s:'A four-shot exchange in the corridor is present in A and absent from B.',
+   x:'Runs of consecutive deleted shots merge into one region, so a removed scene reads as one finding rather than four.'},
+  {t:'equal',w:22,as:761,ae:1878,bs:724,be:1841,n:203},
+  {t:'audio',w:10,as:1878,ae:1907,bs:1841,be:1870,n:3,
+   s:'Picture identical; the dialogue under these three shots differs.',
+   x:'Found by the second pass, not the alignment: audio distance 34/64 against a picture distance of 2/64.'},
+  {t:'equal',w:18,as:1907,ae:3175,bs:1870,be:3138,n:241},
+  {t:'replace',w:11,as:3775,ae:3790,bs:3738,be:3753,n:2,
+   s:'Same slot, same duration, different picture — a reshoot or an alternate take.',
+   x:'The alignment paired these shots (−1) rather than opening two gaps (−2), which is how a replace arises.'},
+  {t:'equal',w:14,as:3790,ae:4278,bs:3753,be:4241,n:96},
+  {t:'insert',w:8,as:4278,ae:4278,bs:4241,be:4275,n:3,
+   s:'A three-shot tag is present in B and absent from A.',
+   x:'The mirror image of a delete: a run of shots in B the alignment could not pair with anything in A.'},
+  {t:'equal',w:8,as:4278,ae:4711,bs:4275,be:4708,n:71}
+];
+FX.regions=function(el){
+  var h=el.querySelector('[data-host]'), cur=0, CL={delete:'del',insert:'ins',replace:'rep',audio:'aud',equal:'eq'};
+  h.innerHTML='<div class="trk" data-tl></div>'+
+    '<div class="key" style="margin-top:16px">'+
+      '<span><i class="dot" style="background:var(--del)"></i>delete</span>'+
+      '<span><i class="dot" style="background:var(--ins)"></i>insert</span>'+
+      '<span><i class="dot" style="background:var(--rep)"></i>replace</span>'+
+      '<span><i class="dot" style="background:var(--aud)"></i>audio changed</span>'+
+      '<span><i class="dot" style="background:rgba(237,238,240,.18)"></i>equal — dropped from the report</span></div>'+
+    '<div style="margin-top:34px;min-height:180px" data-card></div>';
+  var tl=h.querySelector('[data-tl]'), card=h.querySelector('[data-card]');
+  tl.innerHTML=RG.map(function(r,i){
+    return '<div class="c '+CL[r.t]+'" data-i="'+i+'" style="flex:'+r.w+';cursor:pointer;font-size:11.5px">'+
+      (r.t==='equal'?'':r.t)+'</div>' }).join('');
+  function paint(){
+    var r=RG[cur];
+    [].slice.call(tl.children).forEach(function(x,i){x.classList.toggle('dim',i!==cur)});
+    if(r.t==='equal'){ card.innerHTML='<h3>Equal — '+r.n+' shots</h3>'+
+      '<p class="small" style="margin-top:11px;max-width:74ch">Runs of matched shots are <b>dropped</b> from '+
+      'the report. A version diff that lists the 611 shots two cuts have in common is a version diff nobody '+
+      'reads.</p>'; return }
+    card.innerHTML='<div class="row mid" style="gap:14px">'+
+        '<h3 class="'+({del:'de',ins:'in',rep:'re',aud:'au'}[CL[r.t]])+'">'+r.t+'</h3>'+
+        '<span class="small mono">'+r.n+' shot'+(r.n===1?'':'s')+'</span></div>'+
+      '<div class="pre" style="font-size:15px;margin-top:16px">A   '+tc(r.as)+' → '+tc(r.ae)+
+        (r.ae-r.as<0.5?'   <span class="fade">(no content on this side)</span>':'')+'\n'+
+        'B   '+tc(r.bs)+' → '+tc(r.be)+
+        (r.be-r.bs<0.5?'   <span class="fade">(no content on this side)</span>':'')+'</div>'+
+      '<p style="margin-top:16px;font-size:17px;color:var(--ink);max-width:74ch">'+r.s+'</p>'+
+      '<p class="small" style="margin-top:9px;max-width:74ch">'+r.x+'</p>';
+  }
+  tl.addEventListener('click',function(e){ var b=e.target.closest('[data-i]'); if(!b) return;
+    cur=+b.dataset.i; paint() });
+  paint();
+};
+
+/* ── where the model sits ─────────────────────────────────────────── */
+FX.llm=function(el){
+  var h=el.querySelector('[data-host]'), on=true;
+  h.innerHTML='<div class="row mid" style="gap:20px">'+
+      '<span class="small">Stage 6 · local model</span>'+
+      '<div class="seg" data-seg><button data-s="1" class="sel">Running</button><button data-s="0">Off</button></div>'+
+      '<span class="small mono" data-hint></span></div>'+
+    '<div class="row" style="gap:44px;margin-top:30px">'+
+      '<div class="grow"><p class="small" style="margin-bottom:14px">One region, as reported</p>'+
+        '<div data-card></div></div>'+
+      '<div style="width:400px;flex:none;display:flex;flex-direction:column;gap:16px">'+
+        '<div class="item"><h3 class="in">What it is asked</h3><p>"Here are thumbnails from one region of '+
+          'one version, plus its type and duration. Describe what is shown, in one sentence."</p></div>'+
+        '<div class="item"><h3 class="de">What it is never asked</h3><p>"Here are two sets of frames — tell '+
+          'us what changed." The comparison is assembled in Python from values already computed.</p></div>'+
+      '</div></div>'+
+    '<p class="note" style="margin-top:30px" data-v></p>';
+  var card=h.querySelector('[data-card]'), vv=h.querySelector('[data-v]');
+  function paint(){
+    card.innerHTML='<div class="pre" style="font-size:15px">type    <span class="de">delete</span>\n'+
+      'A       00:12:04 → 00:12:41\nB       00:12:04 → 00:12:04\nshots   4\nthumbs  4 frames, A side</div>'+
+      (on ? '<p style="margin-top:20px;font-size:17px;color:var(--ink);border-left:1px solid var(--mut);padding-left:18px">'+
+            '"A four-shot exchange in the corridor is missing from the TV cut."</p>'
+          : '<p class="small" style="margin-top:20px;border-left:1px solid var(--line2);padding-left:18px">'+
+            'Four shots removed, 37 seconds.<br><span style="color:var(--line2)">— the factual summary, assembled in Python</span></p>');
+    vv.innerHTML = on
+      ? 'The detection is <b>already finished</b> before the model is asked anything. Type, boundaries and '+
+        'both timecodes were decided by arithmetic; the model only turned them into a sentence.'
+      : '<b class="ink">Switch it off and you lose the prose. You lose no finding, no timecode and no region.</b> '+
+        'That is the whole design: stages 0–5 and 7 were required to work with stage 6 disabled before it was written.';
+    h.querySelector('[data-hint]').textContent = on
+      ? 'qwen3-vl:8b · localhost:11434 · 2 in flight · temp 0.2' : 'the one network call in the system, not made';
+  }
+  h.querySelector('[data-seg]').addEventListener('click',function(e){
+    var b=e.target.closest('button'); if(!b) return; on=b.dataset.s==='1';
+    [].slice.call(this.children).forEach(function(x){x.classList.toggle('sel',x===b)}); paint() });
+  paint();
+};
+
+/* ── MXF audio tracks ─────────────────────────────────────────────── */
+var TKS=[['1','Dialogue L'],['2','Music'],['3','Effects L'],['4','Effects R'],['5','Dialogue R'],['6','M&E']];
+FX.mxf=function(el){
+  var h=el.querySelector('[data-host]'), merged=false;
+  h.innerHTML='<div class="row mid" style="gap:20px">'+
+      '<span class="small">ffmpeg mapping</span>'+
+      '<div class="seg" data-seg><button data-s="0" class="sel">ffmpeg -i src</button>'+
+      '<button data-s="1">amerge, all tracks</button></div></div>'+
+    '<div class="row" style="gap:56px;margin-top:30px">'+
+      '<div class="grow"><p class="small" style="margin-bottom:14px">Discrete mono tracks in the MXF</p>'+
+        '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px" data-tk></div>'+
+        '<p class="small" style="margin-top:18px" data-note></p></div>'+
+      '<div style="width:340px;flex:none">'+
+        '<p class="small" style="margin-bottom:12px">A music-only change, measured</p>'+
+        '<div style="display:flex;align-items:baseline;gap:12px">'+
+          '<span class="mono" data-big style="font-size:56px;font-weight:500;letter-spacing:-.04em"></span>'+
+          '<span class="small mono">/ 64 bits differ</span></div>'+
+        '<p class="small" data-verdict style="margin-top:16px"></p></div>'+
+    '</div><p class="note" style="margin-top:30px" data-v></p>';
+  var tk=h.querySelector('[data-tk]'), big=h.querySelector('[data-big]'),
+      vd=h.querySelector('[data-verdict]'), vv=h.querySelector('[data-v]');
+  function paint(){
+    tk.innerHTML=TKS.map(function(t,i){ var live=merged||i===0;
+      return '<div class="opt'+(live?' sel':' off')+'" style="cursor:default">'+
+        '<span>'+t[0]+' · '+t[1]+'</span>'+(live?'':'<span class="v">dropped</span>')+'</div>' }).join('');
+    h.querySelector('[data-note]').innerHTML = merged
+      ? 'All six merged to stereo before hashing, so a change anywhere in the soundtrack reaches the fingerprint.'
+      : 'Broadcast MXF carries <b>discrete mono tracks</b>. <span class="mono">ffmpeg -i src</span> maps only the first.';
+    big.textContent=merged?'26':'0'; big.className='mono '+(merged?'in':'de');
+    vd.innerHTML = merged
+      ? 'The change is on track 2. With every track merged it registers clearly, and the region is reported — in the fingerprint <em>and</em> in playback.'
+      : 'The change is on track 2, which was never read. <b>Zero.</b> The shot pairs as identical and the difference disappears from the report.';
+    vv.innerHTML = merged
+      ? '<b class="in">Fixed.</b> Every audio track is merged in the proxy stage with <span class="mono">amerge</span>, '+
+        'and clips cut for playback come from the original with the same mapping.'
+      : '<b class="ink">The failure was silent.</b> Five of six stems vanished from playback <em>and</em> from the '+
+        'fingerprint, and nothing in the output said so. Only a file with a change confined to track 2 could expose it.';
+  }
+  h.querySelector('[data-seg]').addEventListener('click',function(e){
+    var b=e.target.closest('button'); if(!b) return; merged=b.dataset.s==='1';
+    [].slice.call(this.children).forEach(function(x){x.classList.toggle('sel',x===b)}); paint() });
+  paint();
+};
+
+/* ── HDR tone-mapping ─────────────────────────────────────────────── */
+FX.hdr=function(el){
+  var h=el.querySelector('[data-host]'), tm=false;
+  h.innerHTML='<div class="row mid" style="gap:20px">'+
+      '<span class="small">Proxy build</span>'+
+      '<div class="seg" data-seg><button data-s="0" class="sel">scale only</button>'+
+      '<button data-s="1">zscale → tonemap → bt709</button></div>'+
+      '<span class="small mono" data-hint></span></div>'+
+    '<p class="small" style="margin-top:30px;margin-bottom:18px">The same edit, delivered once as SDR and once as HDR10</p>'+
+    '<div style="position:relative">'+
+      '<div class="band"><div class="z" style="width:17.2%">MATCH 0–10</div>'+
+      '<div class="z" style="width:15.6%">WEAK 11–20</div>'+
+      '<div class="z" style="flex:1">MISMATCH 21–64</div></div>'+
+      '<div class="needle" data-needle style="left:0"></div></div>'+
+    '<div style="margin-top:34px;display:flex;flex-direction:column;gap:8px" data-trk></div>'+
+    '<p class="small" style="margin-top:16px" data-sum></p>'+
+    '<p class="note" style="margin-top:26px" data-v></p>';
+  var nd=h.querySelector('[data-needle]'), trk=h.querySelector('[data-trk]'),
+      vv=h.querySelector('[data-v]'), sum=h.querySelector('[data-sum]');
+  function paint(){
+    var d=tm?6:12;
+    nd.style.left=(d/64*100)+'%'; nd.dataset.v=d+'/64';
+    var cells=[1,2,3,4,5,6].map(function(i){return {cls:tm?'eq':'rep',t:'s'+i}});
+    trk.innerHTML=track('A',cells,true)+track('B',cells,true);
+    sum.innerHTML = tm
+      ? '<b class="in">0 regions.</b> The dynamic-range difference is still reported — in the technical section, where it belongs.'
+      : '<b class="re">6 replace regions.</b> Identical footage, reported as a total re-shoot.';
+    vv.innerHTML = tm
+      ? '<b class="in">6/64 — inside the match band.</b> Tone-mapped into a common space, the picture compares '+
+        'like with like. Needs an ffmpeg built with libzimg for <span class="mono">zscale</span>.'
+      : '<b class="ink">12/64 — inside the weak band.</b> PQ pixels went into an 8-bit BT.709 proxy unchanged. '+
+        'Close enough not to be a mismatch, far enough not to be a match — so the alignment refused to call anything equal.';
+    h.querySelector('[data-hint]').textContent = tm ? 'PROXY_PIPELINE_VERSION = 2' : 'PROXY_PIPELINE_VERSION = 1';
+  }
+  h.querySelector('[data-seg]').addEventListener('click',function(e){
+    var b=e.target.closest('button'); if(!b) return; tm=b.dataset.s==='1';
+    [].slice.call(this.children).forEach(function(x){x.classList.toggle('sel',x===b)}); paint() });
+  paint();
+};
+
+/* ── the acceptance suite ─────────────────────────────────────────── */
+var CK=[
+  {n:1,d:'720p vs 360p of the same edit fingerprints identically — resolution invariance',v:'pass'},
+  {n:2,d:'A removed scene yields exactly one <span class="mono">delete</span>, at the right timecode',v:'pass'},
+  {n:3,d:'A replaced soundtrack yields <span class="mono">audio_changed</span>, picture untouched',v:'pass'},
+  {n:4,d:'<span class="mono">report.html</span> is genuinely self-contained — zero external references',v:'pass'},
+  {n:5,d:'Descriptions come back from a real local model',v:'skip'},
+  {n:6,d:'Same runtime, same cuts, different picture → one <span class="mono">replace</span>, nothing else',v:'pass'},
+  {n:7,d:'A four-change TV delivery: each change found, independently',v:'pass'},
+  {n:8,d:'SDR vs HDR10 of one edit → <b>zero</b> regions, dynamic range reported technically',v:'pass'}
+];
+FX.checks=function(el){
+  var h=el.querySelector('[data-host]'), st=CK.map(function(){return ''}), t=null;
+  h.innerHTML='<div class="row mid" style="gap:14px;margin-bottom:20px">'+
+      '<button class="btn p" data-run>Run the suite</button>'+
+      '<button class="btn" data-rs>Reset</button>'+
+      '<span class="small mono" data-sum></span></div>'+
+    '<div data-rows></div>'+
+    '<div class="row" style="gap:44px;margin-top:26px">'+
+      '<p class="small grow">Variants are generated from one source with the edit points <b>recorded as they '+
+        'are made</b>, into <span class="mono">fixtures/ground_truth.json</span>. The pipeline then has to '+
+        'rediscover them within a timecode tolerance — it is never shown the answer.</p>'+
+      '<p class="small grow">Check 5 needs a running Ollama and reports <span class="mono">SKIP</span> without '+
+        'one, by design: the model is optional, so its absence must not fail the suite. Check 7 <em>reports</em> '+
+        'rather than asserts one sub-case — asserting it would be asserting a property of the fixture.</p></div>';
+  var rows=h.querySelector('[data-rows]'), sum=h.querySelector('[data-sum]');
+  function paint(){
+    rows.innerHTML=CK.map(function(c,i){ var s=st[i];
+      return '<div class="ck '+s+'"><span class="n">'+c.n+'</span><span class="d">'+c.d+'</span>'+
+        '<span class="v">'+(s==='pass'?'pass':s==='skip'?'skip':s==='run'?'running…':'—')+'</span></div>' }).join('');
+    var p=st.filter(function(x){return x==='pass'}).length, k=st.filter(function(x){return x==='skip'}).length;
+    sum.innerHTML=(p+k)===0?'':'<span class="in">'+p+' passed</span> · <span class="re">'+k+'</span> skipped · 0 failed';
+  }
+  h.querySelector('[data-run]').onclick=function(){
+    clearTimeout(t); st=CK.map(function(){return ''}); paint(); var i=0;
+    (function tick(){ if(i>0) st[i-1]=CK[i-1].v;
+      if(i<CK.length){ st[i]='run'; paint(); i++; t=setTimeout(tick,400) } else paint() })() };
+  h.querySelector('[data-rs]').onclick=function(){clearTimeout(t);st=CK.map(function(){return ''});paint()};
+  paint();
+};
+
+/* ── the roadmap ──────────────────────────────────────────────────── */
+var RD=[
+  {h:'near',t:'A colour signal beside the luma one',
+   d:'A per-shot colour histogram, compared on its own axis, turns the greyscale blind spot into a reported <span class="mono">graded</span> region. Same architecture — a second annotation pass, not a change to the alignment.'},
+  {h:'near',t:'Validation on real footage',
+   d:'Run the suite against genuine multi-version titles. Measure shot detection through dissolves and fades, and settle the within-a-long-take case that check 7 currently only reports.'},
+  {h:'near',t:'EDL / AAF export',
+   d:'Regions already carry timecodes on both sides. Emitting an EDL puts the findings straight into the tool the editor already has open, instead of a report they must retype from.'},
+  {h:'medium',t:'Multi-frame shots, sub-shot alignment',
+   d:'Hash several frames per shot rather than the midpoint alone, and align <em>within</em> a matched pair to locate a trim inside a long take. Costs linearly; buys back the sensitivity given up at stage 4.'},
+  {h:'medium',t:'A fingerprint store',
+   d:'Fingerprints are already cached per file. Persist them and the question changes from "how do these two differ" to <b>"which version in the library is this, and what is it closest to"</b> — with no re-decode.'},
+  {h:'medium',t:'Subtitles and burn-ins as a third track',
+   d:'Compliance and localisation differences often live entirely in the text layer. It aligns exactly like the other two — same sequence, same algorithm, third annotation.'},
+  {h:'longer',t:'Beyond two versions',
+   d:'A version <em>tree</em> across every cut of a title: which derives from which, what each uniquely contains. Progressive alignment against a reference, the way multiple sequence alignment actually does it.'},
+  {h:'longer',t:'Headless mode in a delivery pipeline',
+   d:'The JSON contract is already stable and the stages are already a graph. Running on ingest — every new master diffed against its predecessor automatically — is a scheduling problem, not a research one.'},
+  {h:'longer',t:'Better prose, same boundary',
+   d:'Larger local models, shot-level captions, scene-level summaries. The boundary does not move: the model describes what alignment found. Detection stays arithmetic.'}
+];
+FX.roadmap=function(el){
+  var h=el.querySelector('[data-host]'), f='all', cur=0;
+  h.innerHTML='<div class="row mid" style="gap:18px;margin-bottom:24px">'+
+      '<div class="seg" data-seg><button data-s="all" class="sel">All nine</button>'+
+      '<button data-s="near">Near</button><button data-s="medium">Medium</button>'+
+      '<button data-s="longer">Longer</button></div><span class="small" data-hint></span></div>'+
+    '<div class="row" style="gap:44px">'+
+      '<div style="width:400px;flex:none;display:flex;flex-direction:column;gap:4px" data-list></div>'+
+      '<div class="grow" style="min-height:200px"><p class="small" data-hz></p>'+
+        '<h3 data-t style="margin-top:8px"></h3><p class="small" data-d style="margin-top:12px"></p></div>'+
+    '</div>'+
+    '<p class="note" style="margin-top:28px;font-size:15px">Every one of these adds a <b>signal</b> or extends '+
+    '<b>reach</b>. None requires moving the boundary between what is computed and what is described.</p>';
+  var list=h.querySelector('[data-list]');
+  function vis(){ return RD.map(function(_,i){return i}).filter(function(i){return f==='all'||RD[i].h===f}) }
+  function paint(){
+    var v=vis(); if(v.indexOf(cur)<0) cur=v[0];
+    list.innerHTML=v.map(function(i){ var r=RD[i];
+      return '<button class="opt'+(i===cur?' sel':'')+'" data-i="'+i+'"><span>'+r.t+'</span>'+
+        '<span class="v">'+r.h+'</span></button>' }).join('');
+    var r2=RD[cur];
+    h.querySelector('[data-hz]').textContent=r2.h==='near'?'Near term':r2.h==='medium'?'Medium term':'Longer term';
+    h.querySelector('[data-t]').textContent=r2.t;
+    h.querySelector('[data-d]').innerHTML=r2.d;
+    h.querySelector('[data-hint]').textContent=v.length+' of 9 shown';
+  }
+  h.querySelector('[data-seg]').addEventListener('click',function(e){
+    var b=e.target.closest('button'); if(!b) return; f=b.dataset.s;
+    [].slice.call(this.children).forEach(function(x){x.classList.toggle('sel',x===b)}); paint() });
+  list.addEventListener('click',function(e){ var b=e.target.closest('button'); if(!b) return;
+    cur=+b.dataset.i; paint() });
+  paint();
+};
+
+/* ═══════════════════════════════════════════════════════════════ boot */
+(function(){
+  var jl=document.getElementById('jumpList');
+  jl.innerHTML=slides.map(function(s){ var t=s.querySelector('h1,h2');
+    return '<li>'+(s.dataset.title||(t?t.textContent:'Slide'))+'</li>' }).join('');
+  [].slice.call(jl.children).forEach(function(li,i){
+    li.addEventListener('click',function(){goSlide(i,false);toggleOvl('jump')}) });
+  fit(); render();
+  setTimeout(function(){toast('Click the screen edges to advance · ? for help')},700);
+})();
+</script>
+</body>
+</html>
